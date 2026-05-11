@@ -30,6 +30,25 @@ app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
     });
 });
 
+app.MapGet("/v1/models", (IOptions<FoundryLocalOptions> options) =>
+{
+    var model = options.Value.Model;
+    return Results.Ok(new
+    {
+        @object = "list",
+        data = new[]
+        {
+            new
+            {
+                id = model,
+                @object = "model",
+                created = 0,
+                owned_by = "foundry-local",
+            }
+        }
+    });
+});
+
 app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
 {
     var requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
