@@ -58,10 +58,20 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     }
 
     var proxyClient = httpClientFactory.CreateClient();
-    using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+    try
+    {
+        using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
-    return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+        return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Problem(
+            title: "Foundry Local Unavailable",
+            detail: $"Could not reach Foundry Local at {foundryOptions.Endpoint}. Ensure the service is running. ({ex.Message})",
+            statusCode: 503);
+    }
 });
 
 app.MapDefaultEndpoints();

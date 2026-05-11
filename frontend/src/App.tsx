@@ -60,7 +60,15 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`Completion failed (${response.status})`);
+        let detail = `Completion failed (${response.status})`;
+        try {
+          const errBody = await response.json() as { detail?: string; title?: string };
+          if (errBody.detail) detail = errBody.detail;
+          else if (errBody.title) detail = errBody.title;
+        } catch {
+          // non-JSON error body — keep generic message
+        }
+        throw new Error(detail);
       }
 
       const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
