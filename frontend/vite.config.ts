@@ -10,6 +10,11 @@ export default defineConfig({
       '/api': {
         target: process.env.SERVER_HTTPS || process.env.SERVER_HTTP,
         changeOrigin: true
+      },
+      // Proxy OpenAI-compatible endpoint to the app service
+      '/v1': {
+        target: process.env.SERVER_HTTPS || process.env.SERVER_HTTP,
+        changeOrigin: true
       }
     }
   }
