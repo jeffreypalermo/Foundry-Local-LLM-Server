@@ -30,7 +30,7 @@ You can override in `FoundryLocalLlmServer.Server/appsettings*.json` or environm
 ## Run the Aspire app
 
 ```bash
-dotnet run --project /home/runner/work/Foundry-Local-LLM-Server/Foundry-Local-LLM-Server/FoundryLocalLlmServer.AppHost/FoundryLocalLlmServer.AppHost.csproj
+dotnet run --project ./FoundryLocalLlmServer.AppHost/FoundryLocalLlmServer.AppHost.csproj
 ```
 
 ## Open code CLI compatibility
@@ -45,7 +45,7 @@ For example, configure your tool with `base_url=http://localhost:5057/v1` and `m
 ## Tests
 
 ```bash
-dotnet test /home/runner/work/Foundry-Local-LLM-Server/Foundry-Local-LLM-Server/FoundryLocalLlmServer.sln
+dotnet test ./FoundryLocalLlmServer.sln
 ```
 
 Integration tests run with `FoundryLocal:UseStubResponses=true` so they are fully automated and do not require a GPU during CI.
