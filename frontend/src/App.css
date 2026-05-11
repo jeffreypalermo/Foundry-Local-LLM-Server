@@ -1,0 +1,52 @@
+.app-shell {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.prompt-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.75rem;
+}
+
+button {
+  width: fit-content;
+  padding: 0.6rem 1rem;
+  font: inherit;
+}
+
+.chat-log {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.message {
+  border: 1px solid #d4d4d8;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.message.user {
+  background: #eff6ff;
+}
+
+.message.assistant {
+  background: #f5f3ff;
+}
+
+.config-line {
+  margin: 0;
+}
+
+.error {
+  color: #b91c1c;
+  font-weight: 600;
+}
