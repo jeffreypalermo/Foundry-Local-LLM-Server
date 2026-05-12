@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Xunit.Abstractions;
 
 namespace FoundryLocalLlmServer.IntegrationTests;
 
@@ -7,10 +8,17 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// Integration tests that validate each Foundry Local model's ability to generate
 /// a working .NET 10 Aspire application via opencode.
 /// Requires Foundry Local GPU service to be running (any port — discovered via CLI).
-/// Skips automatically when that service is unavailable or a model is not downloaded.
+/// Automatically downloads and loads GPU model variants as needed.
 /// </summary>
 public class AspireGenerationIntegrationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public AspireGenerationIntegrationTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     private static readonly Regex AnsiEscapePattern =
         new(@"\x1b\[[0-9;]*[mGKHFJA-Za-z]", RegexOptions.Compiled);
 
@@ -61,17 +69,19 @@ public class AspireGenerationIntegrationTests
         Skip.If(foundryUrl == null || !await FoundryServiceHelper.IsRunningAsync(),
             "Foundry Local not running — skipping live integration test");
 
-        Skip.If(!await FoundryServiceHelper.IsModelAvailableAsync(modelAlias),
-            $"Model '{modelAlias}' not found in Foundry Local model list — not downloaded yet");
+        // Ensure the GPU variant is downloaded and loaded
+        _output.WriteLine($"Ensuring GPU model ready: {modelAlias}");
+        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync(modelAlias, _output);
+        Skip.If(!modelReady,
+            $"Could not download/load GPU variant of '{modelAlias}' — model may not be available in catalog");
 
-        // opencode sends a system prompt + tool definitions that typically consume 2 000–3 000 tokens.
-        // Models with a total context window below this threshold cannot process the request.
+        // Verify the context window is large enough for opencode
         const int MinContextForOpenCodeTools = 4096;
         var contextWindow = await FoundryServiceHelper.GetModelContextWindowAsync(modelAlias);
+        _output.WriteLine($"Model '{modelAlias}' context window: {contextWindow} tokens");
         Skip.If(contextWindow > 0 && contextWindow < MinContextForOpenCodeTools,
             $"Model '{modelAlias}' context window ({contextWindow} tokens) is too small for opencode tool-calling " +
-            $"(minimum {MinContextForOpenCodeTools} tokens required). " +
-            $"Download a GPU variant of this model for larger context support.");
+            $"(minimum {MinContextForOpenCodeTools} tokens required).");
 
         var testRunId = Guid.NewGuid().ToString("N")[..8];
         var tempDir = Path.Combine(Path.GetTempPath(), $"aspire-gen-{modelAlias}-{testRunId}");
@@ -98,12 +108,16 @@ public class AspireGenerationIntegrationTests
                 WorkingDirectory = tempDir,
             };
 
+            _output.WriteLine($"Running opencode with model: {modelAlias}");
             var (openCodeExit, openCodeStdout, openCodeStderr) =
                 await RunProcessAsync(psi, TimeSpan.FromSeconds(300));
 
             var cleanStdout = StripAnsiCodes(openCodeStdout);
             var cleanStderr = StripAnsiCodes(openCodeStderr);
             var combinedOutput = $"{cleanStdout}\n{cleanStderr}";
+
+            _output.WriteLine($"opencode exit code: {openCodeExit}");
+            _output.WriteLine($"opencode stdout length: {cleanStdout.Length}");
 
             // Skip if model wasn't available at runtime
             if (ContainsModelNotAvailablePhrase(combinedOutput))
@@ -116,6 +130,7 @@ public class AspireGenerationIntegrationTests
 
             // Build assertion
             var createdFiles = Directory.GetFiles(tempDir, "*", SearchOption.AllDirectories);
+            _output.WriteLine($"Files created: {createdFiles.Length}");
             Assert.True(
                 createdFiles.Length > 0,
                 $"opencode ran but created no files in '{tempDir}'. " +
@@ -134,6 +149,7 @@ public class AspireGenerationIntegrationTests
             var (buildExit, buildStdout, buildStderr) =
                 await RunProcessAsync(buildPsi, TimeSpan.FromSeconds(120));
 
+            _output.WriteLine($"dotnet build exit code: {buildExit}");
             Assert.True(
                 buildExit == 0,
                 $"dotnet build failed (exit {buildExit}).\nstdout:\n{buildStdout}\nstderr:\n{buildStderr}");
@@ -164,6 +180,8 @@ public class AspireGenerationIntegrationTests
             Assert.True(
                 appStarted,
                 $"Aspire app did not emit a startup message within 30s.\nOutput:\n{runOutput}");
+
+            _output.WriteLine($"✅ Model '{modelAlias}' successfully generated and ran an Aspire app.");
         }
         finally
         {

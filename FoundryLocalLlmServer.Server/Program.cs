@@ -40,6 +40,16 @@ var aliasCache = new ConcurrentDictionary<string, (string ResolvedId, int MaxTok
 // "mini", "reasoning", etc. are NOT here because they extend the alias, not terminate it.
 string[] backendTokens = ["cuda", "openvino", "generic", "trtrtx", "npu", "gpu", "cpu", "instruct"];
 
+bool IsGpuVariant(string modelId)
+{
+    var lower = modelId.ToLowerInvariant();
+    if (lower.Contains("cuda") || lower.Contains("trtrtx"))
+        return true;
+    if (lower.Contains("-gpu") && !lower.Contains("npu"))
+        return true;
+    return false;
+}
+
 bool ModelIdMatchesAlias(string modelId, string alias)
 {
     if (string.Equals(modelId, alias, StringComparison.OrdinalIgnoreCase)) return true;
@@ -92,8 +102,10 @@ async Task<(string ResolvedId, int MaxTokens)> ResolveModelAsync(string requeste
         return entry;
     }
 
-    // Find the first loaded model whose ID matches the requested alias
-    var match = foundryModels.FirstOrDefault(m => ModelIdMatchesAlias(m.Id, requestedModel));
+    // Find matching models and prefer GPU variants over NPU
+    var matches = foundryModels.Where(m => ModelIdMatchesAlias(m.Id, requestedModel)).ToArray();
+    var gpuMatch = matches.FirstOrDefault(m => IsGpuVariant(m.Id));
+    var match = gpuMatch ?? matches.FirstOrDefault();
     var result = match != null
         ? (match.Id, match.MaxTotalTokens)
         : (requestedModel, 0); // fall back; 0 means no capping

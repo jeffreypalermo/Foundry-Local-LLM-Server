@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Xunit.Abstractions;
 
 namespace FoundryLocalLlmServer.IntegrationTests;
 
@@ -7,10 +8,17 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// Live integration test: starts the server binary, runs the opencode CLI against it,
 /// and verifies a coherent response from phi-4.
 /// Requires Foundry Local GPU service to be running (any port — discovered via CLI).
-/// Skips automatically when that service is unavailable.
+/// Automatically downloads and loads the GPU model variant if needed.
 /// </summary>
 public class OpenCodeIntegrationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public OpenCodeIntegrationTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     // Matches ANSI color/cursor escape sequences produced by opencode's terminal output
     private static readonly Regex AnsiEscapePattern =
         new(@"\x1b\[[0-9;]*[mGKHFJA-Za-z]", RegexOptions.Compiled);
@@ -32,9 +40,11 @@ public class OpenCodeIntegrationTests
         Skip.If(foundryUrl == null || !await FoundryServiceHelper.IsRunningAsync(),
             "Foundry Local not running — skipping live integration test");
 
-        // Skip when phi-4 is not downloaded in Foundry Local
-        Skip.If(!await FoundryServiceHelper.IsModelAvailableAsync("phi-4"),
-            "Model 'phi-4' not found in Foundry Local — download it with: foundry model download phi-4");
+        // Ensure the GPU variant of phi-4 is downloaded and loaded
+        _output.WriteLine("Ensuring GPU model ready: phi-4");
+        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync("phi-4", _output);
+        Skip.If(!modelReady,
+            "Could not download/load GPU variant of 'phi-4' — model may not be available");
 
         var serverExePath = GetServerExePath();
         Process? serverProcess = null;
@@ -48,6 +58,9 @@ public class OpenCodeIntegrationTests
 
             var cleanStdout = StripAnsiCodes(stdout);
             var cleanStderr = StripAnsiCodes(stderr);
+
+            _output.WriteLine($"opencode exit code: {exitCode}");
+            _output.WriteLine($"stdout length: {cleanStdout.Length}");
 
             // Primary signal: exit code
             Assert.Equal(0, exitCode);
@@ -74,6 +87,8 @@ public class OpenCodeIntegrationTests
                 .ToArray();
 
             Assert.Empty(stderrErrorLines);
+
+            _output.WriteLine("✅ phi-4 opencode test passed.");
         }
         finally
         {
@@ -87,8 +102,6 @@ public class OpenCodeIntegrationTests
 
     private static string GetServerExePath()
     {
-        // Test runs from: .../FoundryLocalLlmServer.IntegrationTests/bin/Debug/net10.0/
-        // Repo root is four directories up.
         var repoRoot = Path.GetFullPath(
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
@@ -116,7 +129,6 @@ public class OpenCodeIntegrationTests
         };
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         psi.Environment["ASPNETCORE_URLS"] = "http://localhost:5537";
-        // Override the Foundry endpoint with the dynamically discovered port
         psi.Environment["FoundryLocal__Endpoint"] = foundryEndpoint;
 
         return Process.Start(psi)
@@ -133,7 +145,6 @@ public class OpenCodeIntegrationTests
             try
             {
                 var response = await httpClient.GetAsync(healthUrl);
-                // Any non-5xx status means the server accepted the connection
                 if ((int)response.StatusCode < 500)
                     return;
             }
@@ -182,6 +193,4 @@ public class OpenCodeIntegrationTests
 
     private static string StripAnsiCodes(string input) =>
         AnsiEscapePattern.Replace(input, string.Empty);
-
 }
-
