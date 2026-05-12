@@ -6,7 +6,7 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// <summary>
 /// Live integration test: starts the server binary, runs the opencode CLI against it,
 /// and verifies a coherent response from phi-4.
-/// Requires Foundry Local GPU service running on port 5273.
+/// Requires Foundry Local GPU service to be running (any port — discovered via CLI).
 /// Skips automatically when that service is unavailable.
 /// </summary>
 public class OpenCodeIntegrationTests
@@ -28,16 +28,20 @@ public class OpenCodeIntegrationTests
     public async Task OpenCodeCli_RunsAgainstServer_ReturnsValidResponse()
     {
         // Skip when Foundry Local GPU service is not available (CI without GPU)
-        var foundryAvailable = await IsFoundryLocalRunningAsync();
-        Skip.If(!foundryAvailable,
-            "Foundry Local not running on port 5273 — skipping live integration test");
+        var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
+        Skip.If(foundryUrl == null || !await FoundryServiceHelper.IsRunningAsync(),
+            "Foundry Local not running — skipping live integration test");
+
+        // Skip when phi-4 is not downloaded in Foundry Local
+        Skip.If(!await FoundryServiceHelper.IsModelAvailableAsync("phi-4"),
+            "Model 'phi-4' not found in Foundry Local — download it with: foundry model download phi-4");
 
         var serverExePath = GetServerExePath();
         Process? serverProcess = null;
 
         try
         {
-            serverProcess = StartServer(serverExePath);
+            serverProcess = StartServer(serverExePath, foundryUrl!);
             await WaitForServerReadyAsync("http://localhost:5537/api/foundry", TimeSpan.FromSeconds(30));
 
             var (exitCode, stdout, stderr) = await RunOpenCodeAsync(TimeSpan.FromSeconds(60));
@@ -102,7 +106,7 @@ public class OpenCodeIntegrationTests
         return exePath;
     }
 
-    private static Process StartServer(string exePath)
+    private static Process StartServer(string exePath, string foundryEndpoint)
     {
         var psi = new ProcessStartInfo(exePath)
         {
@@ -112,6 +116,8 @@ public class OpenCodeIntegrationTests
         };
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         psi.Environment["ASPNETCORE_URLS"] = "http://localhost:5537";
+        // Override the Foundry endpoint with the dynamically discovered port
+        psi.Environment["FoundryLocal__Endpoint"] = foundryEndpoint;
 
         return Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start server process.");
@@ -177,17 +183,5 @@ public class OpenCodeIntegrationTests
     private static string StripAnsiCodes(string input) =>
         AnsiEscapePattern.Replace(input, string.Empty);
 
-    private static async Task<bool> IsFoundryLocalRunningAsync()
-    {
-        try
-        {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var response = await httpClient.GetAsync("http://127.0.0.1:5273/v1/models");
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
 }
+

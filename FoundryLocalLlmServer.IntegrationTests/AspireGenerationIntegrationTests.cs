@@ -6,7 +6,7 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// <summary>
 /// Integration tests that validate each Foundry Local model's ability to generate
 /// a working .NET 10 Aspire application via opencode.
-/// Requires Foundry Local GPU service running on port 5273.
+/// Requires Foundry Local GPU service to be running (any port — discovered via CLI).
 /// Skips automatically when that service is unavailable or a model is not downloaded.
 /// </summary>
 public class AspireGenerationIntegrationTests
@@ -57,11 +57,21 @@ public class AspireGenerationIntegrationTests
     {
         _ = gpuFileSize; // used in test name display only
 
-        Skip.If(!await IsFoundryLocalRunningAsync(),
-            "Foundry Local not running on port 5273 — skipping live integration test");
+        var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
+        Skip.If(foundryUrl == null || !await FoundryServiceHelper.IsRunningAsync(),
+            "Foundry Local not running — skipping live integration test");
 
-        Skip.If(!await IsModelAvailableAsync(modelAlias),
+        Skip.If(!await FoundryServiceHelper.IsModelAvailableAsync(modelAlias),
             $"Model '{modelAlias}' not found in Foundry Local model list — not downloaded yet");
+
+        // opencode sends a system prompt + tool definitions that typically consume 2 000–3 000 tokens.
+        // Models with a total context window below this threshold cannot process the request.
+        const int MinContextForOpenCodeTools = 4096;
+        var contextWindow = await FoundryServiceHelper.GetModelContextWindowAsync(modelAlias);
+        Skip.If(contextWindow > 0 && contextWindow < MinContextForOpenCodeTools,
+            $"Model '{modelAlias}' context window ({contextWindow} tokens) is too small for opencode tool-calling " +
+            $"(minimum {MinContextForOpenCodeTools} tokens required). " +
+            $"Download a GPU variant of this model for larger context support.");
 
         var testRunId = Guid.NewGuid().ToString("N")[..8];
         var tempDir = Path.Combine(Path.GetTempPath(), $"aspire-gen-{modelAlias}-{testRunId}");
@@ -72,7 +82,7 @@ public class AspireGenerationIntegrationTests
 
         try
         {
-            serverProcess = StartServer(serverExePath);
+            serverProcess = StartServer(serverExePath, foundryUrl!);
             await WaitForServerReadyAsync("http://localhost:5537/api/foundry", TimeSpan.FromSeconds(30));
 
             var prompt = "Create a minimal .NET 10 Aspire web application. " +
@@ -105,6 +115,13 @@ public class AspireGenerationIntegrationTests
                 $"opencode exited with code {openCodeExit}.\nstdout:\n{cleanStdout}\nstderr:\n{cleanStderr}");
 
             // Build assertion
+            var createdFiles = Directory.GetFiles(tempDir, "*", SearchOption.AllDirectories);
+            Assert.True(
+                createdFiles.Length > 0,
+                $"opencode ran but created no files in '{tempDir}'. " +
+                $"The model likely responded with text instead of using bash/file tools to scaffold the project.\n" +
+                $"stdout:\n{cleanStdout}\nstderr:\n{cleanStderr}");
+
             var buildPsi = new ProcessStartInfo("dotnet")
             {
                 Arguments = "build",
@@ -181,7 +198,7 @@ public class AspireGenerationIntegrationTests
         return exePath;
     }
 
-    private static Process StartServer(string exePath)
+    private static Process StartServer(string exePath, string foundryEndpoint)
     {
         var psi = new ProcessStartInfo(exePath)
         {
@@ -191,6 +208,7 @@ public class AspireGenerationIntegrationTests
         };
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         psi.Environment["ASPNETCORE_URLS"] = "http://localhost:5537";
+        psi.Environment["FoundryLocal__Endpoint"] = foundryEndpoint;
 
         return Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start server process.");
@@ -297,34 +315,4 @@ public class AspireGenerationIntegrationTests
     private static bool ContainsModelNotAvailablePhrase(string output) =>
         ModelNotAvailablePhrases.Any(phrase =>
             output.Contains(phrase, StringComparison.OrdinalIgnoreCase));
-
-    private static async Task<bool> IsFoundryLocalRunningAsync()
-    {
-        try
-        {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var response = await httpClient.GetAsync("http://127.0.0.1:5273/v1/models");
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static async Task<bool> IsModelAvailableAsync(string modelAlias)
-    {
-        try
-        {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            var response = await httpClient.GetAsync("http://127.0.0.1:5273/v1/models");
-            if (!response.IsSuccessStatusCode) return false;
-            var body = await response.Content.ReadAsStringAsync();
-            return body.Contains(modelAlias, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
 }
