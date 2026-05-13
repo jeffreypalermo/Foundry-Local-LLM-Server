@@ -6,10 +6,11 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 
 /// <summary>
 /// Live integration test: starts the server binary, runs the opencode CLI against it,
-/// and verifies a coherent response from phi-4.
+/// and verifies a coherent response from phi-4-mini.
 /// Requires Foundry Local GPU service to be running (any port — discovered via CLI).
 /// Automatically downloads and loads the GPU model variant if needed.
 /// </summary>
+[Collection("ServerTests")]
 public class OpenCodeIntegrationTests
 {
     private readonly ITestOutputHelper _output;
@@ -31,20 +32,22 @@ public class OpenCodeIntegrationTests
     private static readonly Regex ExceptionColonPattern =
         new(@"\w+Exception\s*:", RegexOptions.Multiline);
 
-    [SkippableFact]
+    [Fact]
     [Trait("Category", "Integration")]
     public async Task OpenCodeCli_RunsAgainstServer_ReturnsValidResponse()
     {
-        // Skip when Foundry Local GPU service is not available (CI without GPU)
+        // Foundry Local GPU service must be available
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
-        Skip.If(foundryUrl == null || !await FoundryServiceHelper.IsRunningAsync(),
-            "Foundry Local not running — skipping live integration test");
+        Assert.True(foundryUrl != null && await FoundryServiceHelper.IsRunningAsync(),
+            "Foundry Local is not running. Start it with 'foundry service start'.");
 
-        // Ensure the GPU variant of phi-4 is downloaded and loaded
-        _output.WriteLine("Ensuring GPU model ready: phi-4");
-        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync("phi-4", _output);
-        Skip.If(!modelReady,
-            "Could not download/load GPU variant of 'phi-4' — model may not be available");
+        // Ensure the GPU variant of phi-4-mini is downloaded and loaded
+        // (phi-4-mini has 131K context, sufficient for opencode's tool-calling system prompt;
+        //  phi-4's 16K context is too small and causes timeouts)
+        _output.WriteLine("Ensuring GPU model ready: phi-4-mini");
+        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync("phi-4-mini", _output);
+        Assert.True(modelReady,
+            "Could not download/load GPU variant of 'phi-4-mini'.");
 
         var serverExePath = GetServerExePath();
         Process? serverProcess = null;
@@ -53,8 +56,9 @@ public class OpenCodeIntegrationTests
         {
             serverProcess = StartServer(serverExePath, foundryUrl!);
             await WaitForServerReadyAsync("http://localhost:5537/api/foundry", TimeSpan.FromSeconds(30));
+            _output.WriteLine("Server is ready on port 5537.");
 
-            var (exitCode, stdout, stderr) = await RunOpenCodeAsync(TimeSpan.FromSeconds(60));
+            var (exitCode, stdout, stderr) = await RunOpenCodeAsync(TimeSpan.FromSeconds(300));
 
             var cleanStdout = StripAnsiCodes(stdout);
             var cleanStderr = StripAnsiCodes(stderr);
@@ -162,14 +166,18 @@ public class OpenCodeIntegrationTests
     {
         var psi = new ProcessStartInfo("opencode")
         {
-            Arguments = "run --model foundry-local/phi-4 \"What is 2+2? Answer in one sentence.\"",
+            Arguments = "run --model foundry-local/phi-4-mini \"What is 2+2? Answer in one sentence.\"",
             UseShellExecute = false,
+            CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
         };
 
         var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start opencode process.");
+
+        process.StandardInput.Close();
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();

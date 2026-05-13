@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FoundryLocalLlmServer.Server;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +13,113 @@ builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.AddHttpClient();
 builder.Services.Configure<FoundryLocalOptions>(builder.Configuration.GetSection(FoundryLocalOptions.SectionName));
+
+// Mutable Foundry endpoint — updated by auto-discovery at startup and on connection failures
+string? _currentFoundryEndpoint = null;
+var _endpointLock = new SemaphoreSlim(1, 1);
+
+// Serialize requests to Foundry — concurrent streaming requests crash the service
+var _foundryRequestGate = new SemaphoreSlim(1, 1);
+
+async Task<string?> DiscoverFoundryEndpointAsync()
+{
+    try
+    {
+        using var proc = Process.Start(new ProcessStartInfo("foundry")
+        {
+            Arguments = "service start",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        });
+        if (proc != null)
+        {
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await proc.WaitForExitAsync(cts.Token);
+            var combined = await stdoutTask + await stderrTask;
+            var match = Regex.Match(combined, @"(?:running|started)\s+on\s+(http://[^\s/]+)", RegexOptions.IgnoreCase);
+            if (match.Success)
+                return match.Groups[1].Value.TrimEnd('/');
+        }
+    }
+    catch { /* Foundry CLI not available */ }
+    return null;
+}
+
+async Task EnsureModelLoadedAsync(string modelAlias, ILogger logger)
+{
+    try
+    {
+        logger.LogInformation("Loading model {Model} on Foundry...", modelAlias);
+        using var proc = Process.Start(new ProcessStartInfo("foundry")
+        {
+            Arguments = $"model load {modelAlias} --device GPU --ttl 7200",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        });
+        if (proc != null)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            await proc.WaitForExitAsync(cts.Token);
+            var output = await proc.StandardOutput.ReadToEndAsync();
+            logger.LogInformation("Model load result: {Output}", output.Trim());
+        }
+    }
+    catch (Exception ex) { logger.LogWarning(ex, "Model load failed for {Model}", modelAlias); }
+}
+
+async Task<string> GetFoundryEndpointAsync(string configuredEndpoint, bool forceRediscovery = false)
+{
+    if (!forceRediscovery && _currentFoundryEndpoint != null)
+        return _currentFoundryEndpoint;
+
+    await _endpointLock.WaitAsync();
+    try
+    {
+        if (!forceRediscovery && _currentFoundryEndpoint != null)
+            return _currentFoundryEndpoint;
+
+        // Check if current endpoint is reachable
+        var endpointToCheck = _currentFoundryEndpoint ?? configuredEndpoint;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            var resp = await http.GetAsync($"{endpointToCheck}/v1/models");
+            if (resp.IsSuccessStatusCode)
+            {
+                _currentFoundryEndpoint = endpointToCheck;
+                return _currentFoundryEndpoint;
+            }
+        }
+        catch { /* not reachable */ }
+
+        // Discover via CLI
+        var discovered = await DiscoverFoundryEndpointAsync();
+        _currentFoundryEndpoint = discovered ?? configuredEndpoint;
+        return _currentFoundryEndpoint;
+    }
+    finally
+    {
+        _endpointLock.Release();
+    }
+}
+
+// Auto-discover Foundry Local endpoint at startup
+if (!builder.Configuration.GetValue<bool>("FoundryLocal:UseStubResponses"))
+{
+    var configuredEndpoint = builder.Configuration["FoundryLocal:Endpoint"] ?? "http://127.0.0.1:5273";
+    var discovered = await GetFoundryEndpointAsync(configuredEndpoint);
+    if (discovered != configuredEndpoint)
+    {
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["FoundryLocal:Endpoint"] = discovered
+        });
+    }
+}
 
 var app = builder.Build();
 
@@ -35,6 +144,14 @@ app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
 // maxTotalTokens = maxInputTokens + maxOutputTokens as reported by Foundry.
 // Foundry enforces this as the hard limit for the max_tokens parameter.
 var aliasCache = new ConcurrentDictionary<string, (string ResolvedId, int MaxTokens)>(StringComparer.OrdinalIgnoreCase);
+
+// Cached models list with expiry — avoids hammering Foundry on every request
+FoundryModel[] cachedModels = [];
+DateTime cachedModelsExpiry = DateTime.MinValue;
+var cachedModelsLock = new SemaphoreSlim(1, 1);
+
+// Safe fallback: cap max_tokens when model resolution fails to prevent Foundry OOM crashes
+const int DefaultMaxTokensFallback = 4096;
 
 // Token words that immediately follow the alias in Foundry model IDs (e.g. "phi-4-cuda-gpu:4")
 // "mini", "reasoning", etc. are NOT here because they extend the alias, not terminate it.
@@ -62,26 +179,47 @@ bool ModelIdMatchesAlias(string modelId, string alias)
         || afterAlias.StartsWith(t + ":"));
 }
 
-async Task<FoundryModel[]> GetFoundryModelsAsync(string endpoint, IHttpClientFactory factory)
+async Task<FoundryModel[]> GetFoundryModelsAsync(string endpoint, IHttpClientFactory factory, bool forceRefresh = false)
 {
+    if (!forceRefresh && cachedModels.Length > 0 && DateTime.UtcNow < cachedModelsExpiry)
+        return cachedModels;
+
+    await cachedModelsLock.WaitAsync();
     try
     {
+        // Double-check after acquiring lock
+        if (!forceRefresh && cachedModels.Length > 0 && DateTime.UtcNow < cachedModelsExpiry)
+            return cachedModels;
+
         using var client = factory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(10);
         var resp = await client.GetAsync(new Uri(new Uri(endpoint), "/v1/models"));
-        if (!resp.IsSuccessStatusCode) return [];
+        if (!resp.IsSuccessStatusCode) return cachedModels; // return stale cache
 
         var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync());
-        return json?["data"]?.AsArray()
+        var models = json?["data"]?.AsArray()
             .Select(n => new FoundryModel(
                 n?["id"]?.GetValue<string>() ?? string.Empty,
                 n?["maxInputTokens"]?.GetValue<int>() ?? 0,
-                n?["maxOutputTokens"]?.GetValue<int>() ?? 0))
+                n?["maxOutputTokens"]?.GetValue<int>() ?? 0,
+                n?["toolCalling"]?.GetValue<bool>() ?? false))
             .Where(m => m.Id.Length > 0)
             .ToArray() ?? [];
+
+        if (models.Length > 0)
+        {
+            cachedModels = models;
+            cachedModelsExpiry = DateTime.UtcNow.AddSeconds(30);
+        }
+        return cachedModels;
     }
     catch
     {
-        return [];
+        return cachedModels; // return stale cache on error
+    }
+    finally
+    {
+        cachedModelsLock.Release();
     }
 }
 
@@ -118,7 +256,8 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
 {
     aliasCache.Clear(); // refresh alias cache when models are re-queried
 
-    var foundryModels = await GetFoundryModelsAsync(options.Value.Endpoint, httpClientFactory);
+    var endpoint = await GetFoundryEndpointAsync(options.Value.Endpoint);
+    var foundryModels = await GetFoundryModelsAsync(endpoint, httpClientFactory, forceRefresh: true);
 
     // If Foundry returned real models, proxy them through; otherwise return the configured default
     if (foundryModels.Length > 0)
@@ -132,6 +271,9 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
                 @object = "model",
                 created = 0,
                 owned_by = "foundry-local",
+                maxInputTokens = m.MaxInputTokens,
+                maxOutputTokens = m.MaxOutputTokens,
+                toolCalling = m.ToolCalling,
             }).ToArray()
         });
     }
@@ -147,66 +289,155 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
     });
 });
 
-app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
+app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
-    var requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
-    var foundryOptions = options.Value;
-
-    if (foundryOptions.UseStubResponses)
-    {
-        var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
-        var model = requestPayload?["model"]?.GetValue<string>() ?? foundryOptions.Model;
-        var stubResponse = OpenAiChatHelpers.CreateStubResponse(model, prompt);
-
-        return Results.Json(stubResponse);
-    }
-
-    // Resolve alias → actual Foundry model ID and learn the model's token cap
-    int maxTokensCap = 0;
-    if (requestPayload?["model"] is JsonNode modelNode)
-    {
-        var requestedModel = modelNode.GetValue<string>();
-        var (resolvedModel, cap) = await ResolveModelAsync(requestedModel, foundryOptions.Endpoint, httpClientFactory);
-        maxTokensCap = cap;
-        if (!string.Equals(requestedModel, resolvedModel, StringComparison.OrdinalIgnoreCase))
-            requestPayload["model"] = resolvedModel;
-    }
-
-    // Cap max_tokens to the model's total context window to prevent 400 Bad Request
-    if (maxTokensCap > 0 && requestPayload?["max_tokens"] is JsonNode maxTokensNode)
-    {
-        var requested = maxTokensNode.GetValue<int>();
-        if (requested > maxTokensCap)
-            requestPayload["max_tokens"] = maxTokensCap;
-    }
-
-    var targetUri = new Uri(new Uri(foundryOptions.Endpoint), "/v1/chat/completions");
-    using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
-    {
-        Content = new StringContent(requestPayload?.ToJsonString() ?? "{}"),
-    };
-
-    request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
-
-    if (!string.IsNullOrWhiteSpace(foundryOptions.ApiKey))
-    {
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", foundryOptions.ApiKey);
-    }
-
-    var proxyClient = httpClientFactory.CreateClient();
     try
     {
-        using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+        var foundryOptions = options.Value;
 
-        return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+        if (foundryOptions.UseStubResponses)
+        {
+            var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
+            var model = requestPayload?["model"]?.GetValue<string>() ?? foundryOptions.Model;
+            var stubResponse = OpenAiChatHelpers.CreateStubResponse(model, prompt);
+
+            return Results.Json(stubResponse);
+        }
+
+        // Resolve alias → actual Foundry model ID and learn the model's token cap
+        int maxTokensCap = 0;
+        var currentEndpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint);
+        string? originalModelAlias = null;
+        if (requestPayload?["model"] is JsonNode modelNode)
+        {
+            var requestedModel = modelNode.GetValue<string>();
+            originalModelAlias = requestedModel;
+            logger.LogInformation("Resolving model alias: {Model} → endpoint {Endpoint}", requestedModel, currentEndpoint);
+            var (resolvedModel, cap) = await ResolveModelAsync(requestedModel, currentEndpoint, httpClientFactory);
+            maxTokensCap = cap;
+            logger.LogInformation("Resolved model: {Resolved} (cap={Cap})", resolvedModel, cap);
+            if (!string.Equals(requestedModel, resolvedModel, StringComparison.OrdinalIgnoreCase))
+                requestPayload["model"] = resolvedModel;
+        }
+
+        // Cap max_tokens to the model's total context window to prevent OOM/400 errors
+        var effectiveCap = maxTokensCap > 0 ? maxTokensCap : DefaultMaxTokensFallback;
+        if (requestPayload?["max_tokens"] is JsonNode maxTokensNode)
+        {
+            var requested = maxTokensNode.GetValue<int>();
+            if (requested > effectiveCap)
+            {
+                logger.LogInformation("Capping max_tokens from {Requested} to {Cap}", requested, effectiveCap);
+                requestPayload["max_tokens"] = effectiveCap;
+            }
+        }
+
+        var isStreaming = requestPayload?["stream"]?.GetValue<bool>() == true;
+        var payloadJson = requestPayload?.ToJsonString() ?? "{}";
+
+        // Serialize requests — Foundry Local crashes on concurrent streaming requests
+        await _foundryRequestGate.WaitAsync(cancellationToken);
+        try
+        {
+        // Try the request, and if Foundry is unreachable, re-discover and retry once
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            var endpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint, forceRediscovery: attempt > 0);
+            if (attempt > 0)
+            {
+                // Clear model caches so alias resolution uses the new endpoint
+                aliasCache.Clear();
+                cachedModelsExpiry = DateTime.MinValue;
+
+                // Ensure the model is loaded on the (possibly restarted) Foundry instance
+                var modelToLoad = originalModelAlias ?? foundryOptions.Model;
+                await EnsureModelLoadedAsync(modelToLoad, logger);
+
+                // Re-resolve model alias against the new endpoint
+                if (requestPayload?["model"] is JsonNode retryModelNode)
+                {
+                    var retryRequested = retryModelNode.GetValue<string>();
+                    var (retryResolved, retryCap) = await ResolveModelAsync(retryRequested, endpoint, httpClientFactory);
+                    if (!string.Equals(retryRequested, retryResolved, StringComparison.OrdinalIgnoreCase))
+                        requestPayload["model"] = retryResolved;
+                    payloadJson = requestPayload?.ToJsonString() ?? "{}";
+                }
+
+                logger.LogInformation("Retry with re-discovered endpoint: {Endpoint}", endpoint);
+            }
+
+            var targetUri = new Uri(new Uri(endpoint), "/v1/chat/completions");
+            logger.LogInformation("Proxying to {TargetUri} (stream={Stream}, attempt={Attempt})", targetUri, isStreaming, attempt);
+
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
+                {
+                    Content = new StringContent(payloadJson),
+                };
+                request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+
+                if (!string.IsNullOrWhiteSpace(foundryOptions.ApiKey))
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", foundryOptions.ApiKey);
+
+                var proxyClient = httpClientFactory.CreateClient();
+                using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                if (isStreaming && response.IsSuccessStatusCode)
+                {
+                    context.Response.StatusCode = (int)response.StatusCode;
+                    context.Response.ContentType = "text/event-stream";
+                    context.Response.Headers.CacheControl = "no-cache";
+                    context.Response.Headers.Connection = "keep-alive";
+                    try
+                    {
+                        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                        await stream.CopyToAsync(context.Response.Body, cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is HttpRequestException or IOException)
+                    {
+                        // Foundry died mid-stream; send [DONE] so the client doesn't hang
+                        logger.LogWarning(ex, "SSE stream interrupted, sending [DONE] to client");
+                        try { await context.Response.WriteAsync("\ndata: [DONE]\n\n"); } catch { }
+                    }
+                    return Results.Empty;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+            }
+            catch (HttpRequestException) when (attempt == 0)
+            {
+                logger.LogWarning("Foundry unreachable at {Endpoint}, attempting re-discovery...", endpoint);
+                continue; // retry with re-discovery
+            }
+        }
+
+        // Should not reach here, but handle gracefully
+        return Results.Problem(title: "Foundry Local Unavailable", statusCode: 503);
+        }
+        finally
+        {
+            _foundryRequestGate.Release();
+        }
     }
     catch (HttpRequestException ex)
     {
+        var foundryOptions = options.Value;
+        logger.LogError(ex, "Foundry Local unavailable after retry at {Endpoint}", foundryOptions.Endpoint);
         return Results.Problem(
             title: "Foundry Local Unavailable",
-            detail: $"Could not reach Foundry Local at {foundryOptions.Endpoint}. Ensure the service is running. ({ex.Message})",
+            detail: $"Could not reach Foundry Local. Ensure the service is running. ({ex.Message})",
             statusCode: 503);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Unhandled error in /v1/chat/completions");
+        return Results.Problem(
+            title: "Internal Server Error",
+            detail: ex.Message,
+            statusCode: 500);
     }
 });
 
@@ -220,7 +451,7 @@ public partial class Program;
 
 // ── Supporting types (must follow all top-level statements) ────────────────────
 
-record FoundryModel(string Id, int MaxInputTokens, int MaxOutputTokens)
+record FoundryModel(string Id, int MaxInputTokens, int MaxOutputTokens, bool ToolCalling)
 {
     public int MaxTotalTokens => MaxInputTokens + MaxOutputTokens;
 }

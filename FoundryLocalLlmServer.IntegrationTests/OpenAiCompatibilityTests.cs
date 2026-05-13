@@ -11,6 +11,7 @@ using OpenAI.Chat;
 
 namespace FoundryLocalLlmServer.IntegrationTests;
 
+[Collection("ServerTests")]
 public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
 {
     private readonly ServerFactory _factory;
@@ -38,8 +39,9 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
 
         var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
         Assert.NotNull(payload);
-        Assert.Equal("phi-4", payload["model"]?.GetValue<string>());
-        Assert.Contains("summarize this test", payload["choices"]?[0]?["message"]?["content"]?.GetValue<string>());
+        var content = payload["choices"]?[0]?["message"]?["content"]?.GetValue<string>();
+        Assert.NotNull(content);
+        Assert.True(content.Length > 0);
     }
 
     [Fact]
@@ -65,23 +67,39 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
 
         var text = string.Concat(response.Messages.SelectMany(m => m.Contents.OfType<TextContent>()).Select(c => c.Text));
 
-        Assert.Contains("openai compatibility", text, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(text);
+        Assert.True(text.Length > 0);
     }
 }
 
-public sealed class ServerFactory : WebApplicationFactory<Program>
+public sealed class ServerFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    private string? _foundryUrl;
+
+    async Task IAsyncLifetime.InitializeAsync()
+    {
+        _foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync()
+            ?? throw new InvalidOperationException(
+                "Foundry Local is not running. Start it with 'foundry service start'.");
+    }
+
+    Task IAsyncLifetime.DisposeAsync() => Task.CompletedTask;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
 
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
-            configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            var config = new Dictionary<string, string?>
             {
                 ["FoundryLocal:Model"] = "phi-4",
-                ["FoundryLocal:UseStubResponses"] = "true",
-            });
+            };
+
+            if (_foundryUrl != null)
+                config["FoundryLocal:Endpoint"] = _foundryUrl;
+
+            configBuilder.AddInMemoryCollection(config);
         });
     }
 }

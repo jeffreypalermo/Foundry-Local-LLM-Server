@@ -52,11 +52,29 @@ internal static class FoundryServiceHelper
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
             var response = await http.GetAsync($"{url}/v1/models");
+            if (!response.IsSuccessStatusCode)
+            {
+                // Cached URL may be stale — rediscover
+                _cachedUrl = null;
+                url = await GetServiceUrlAsync();
+                if (url == null) return false;
+                response = await http.GetAsync($"{url}/v1/models");
+            }
             return response.IsSuccessStatusCode;
         }
         catch
         {
-            return false;
+            // Connection may have been refused if service restarted — try rediscovery
+            _cachedUrl = null;
+            try
+            {
+                url = await GetServiceUrlAsync();
+                if (url == null) return false;
+                using var http2 = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                var resp = await http2.GetAsync($"{url}/v1/models");
+                return resp.IsSuccessStatusCode;
+            }
+            catch { return false; }
         }
     }
 

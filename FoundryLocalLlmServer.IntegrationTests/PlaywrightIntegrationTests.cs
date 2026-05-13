@@ -9,6 +9,7 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// navigates to the frontend, clicks "Send Prompt", and asserts
 /// a valid assistant response appears.
 /// </summary>
+[Collection("ServerTests")]
 public class PlaywrightIntegrationTests : IAsyncDisposable
 {
     private readonly ITestOutputHelper _output;
@@ -18,27 +19,27 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
         _output = output;
     }
 
-    [SkippableFact]
+    [Fact]
     [Trait("Category", "Integration")]
     public async Task AppHost_SendPrompt_ReturnsAssistantResponse()
     {
         // Ensure Foundry Local is running and has at least one GPU model
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
-        Skip.If(foundryUrl == null || !await FoundryServiceHelper.IsRunningAsync(),
-            "Foundry Local not running — skipping Playwright test");
+        Assert.True(foundryUrl != null && await FoundryServiceHelper.IsRunningAsync(),
+            "Foundry Local is not running. Start it with 'foundry service start'.");
 
         // Use phi-4-mini as it's relatively small but capable
         _output.WriteLine("Ensuring GPU model ready: phi-4-mini");
         var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync("phi-4-mini", _output);
-        Skip.If(!modelReady,
-            "Could not load GPU variant of phi-4-mini — skipping Playwright test");
+        Assert.True(modelReady,
+            "Could not load GPU variant of phi-4-mini.");
 
         // Verify wwwroot exists (frontend must be pre-built)
         var serverProjectDir = Path.GetFullPath(
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "FoundryLocalLlmServer.Server"));
         var wwwrootIndex = Path.Combine(serverProjectDir, "wwwroot", "index.html");
-        Skip.If(!File.Exists(wwwrootIndex),
-            $"Frontend not built — run 'npm run build' in frontend/ and copy dist/ to wwwroot/");
+        Assert.True(File.Exists(wwwrootIndex),
+            $"Frontend not built — run 'npm run build' in frontend/ and copy dist/ to wwwroot/. Expected: {wwwrootIndex}");
 
         // Ensure Playwright browsers are installed
         _output.WriteLine("Ensuring Playwright browsers are installed...");
