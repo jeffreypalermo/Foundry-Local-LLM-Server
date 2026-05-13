@@ -41,3 +41,31 @@
 - **Verified behavior:** UI shows "Could not reach Foundry Local at http://127.0.0.1:5273. Ensure the service is running." — actionable for developers.
 - **Build quirk:** `dotnet build` with `Select-String` pipe hangs. Use `-v minimal` without pipes; the build output is parseable inline. Also the `AssemblyInfoInputs.cache` file sometimes gets locked — delete it to unblock a rebuild.
 - **All tests pass:** unit tests, frontend lint, frontend production build all green.
+
+### 2026-05-12 — Resumed live testing (validation session)
+
+- **Test environment:** Ran server binary directly with `FoundryLocalLlmServer.Server.exe` (no Aspire orchestrator, faster iteration).
+- **Test 1 (Config endpoint):** `GET /api/foundry` returns 200 with correct endpoint and model.
+- **Test 2 (Model discovery):** `GET /v1/models` returns 200 with OpenAI-compatible list format, phi-4 model present.
+- **Test 3 (Stub response):** `POST /v1/chat/completions` with `UseStubResponses=true` returns 200 with valid OpenAI-compatible response including choices[0].message.content.
+- **Test 4 (Error handling):** `POST /v1/chat/completions` with `UseStubResponses=false` and Foundry Local unreachable:
+  - Returns **HTTP 503** (correct status for upstream dependency failure)
+  - Content-Type: `application/problem+json` (ProblemDetails per RFC 7807)
+  - JSON body includes `title: "Foundry Local Unavailable"` and `detail: "Could not reach Foundry Local at http://127.0.0.1:5273. Ensure the service is running."`
+  - Detail field includes exception message with exact endpoint and reason (connection refused)
+- **Frontend integration:** App.tsx correctly parses ProblemDetails and displays `detail` field to user.
+- **Verdict:** ✅ All critical paths working. Error handling is actionable and semantically correct. No defects found.
+
+### 2026-05-12 — Live Playwright E2E test (real LLM, Send Prompt button)
+
+- **Full solution build:** ✅ All 4 projects (`Server`, `AppHost`, `UnitTests`, `IntegrationTests`) succeeded with `dotnet build ./FoundryLocalLlmServer.sln -v minimal`. Note: `--no-build` should be used for `dotnet test` when already built to skip the second restore cycle.
+- **Frontend build:** ✅ `npm run build` in `frontend/` produced `dist/` in 119ms (Vite 8.0.7, TypeScript compiled).
+- **Foundry Local status:** ✅ Running. `foundry service status` confirmed `🟢 Model management service is running on http://127.0.0.1:53874/openai/status`. Note: port is dynamic (53874 this session, was 5273 in earlier sessions) — `FoundryServiceHelper` correctly discovers it via `foundry service start` regex pattern.
+- **GPU model loaded:** ✅ `Phi-4-mini-instruct-cuda-gpu:5` confirmed via `GET /v1/models`. The `ModelIdMatchesAlias("Phi-4-mini-instruct-cuda-gpu:5", "phi-4-mini")` → true because `instruct` is a BackendToken.
+- **Playwright test result:** ✅ **PASSED** — `AppHost_SendPrompt_ReturnsAssistantResponse` — 1 test, 0 failed, 0 skipped, duration 63.2s.
+  - Server started on port 5537 in ~57 seconds (Playwright browser install + server spinup).
+  - Model alias resolved: `phi-4-mini` → `Phi-4-mini-instruct-cuda-gpu:5` (context cap=131072).
+  - Chat completion proxied to Foundry Local, 200 response received in 1.78 seconds.
+  - Real LLM response verified non-empty by assertion.
+- **Run command:** `dotnet test ./FoundryLocalLlmServer.IntegrationTests/FoundryLocalLlmServer.IntegrationTests.csproj --filter "FullyQualifiedName~PlaywrightIntegrationTests" -v normal --no-build`
+- **Key infra note:** Running `dotnet test` against the `.sln` with many projects triggers a NuGet restore that can appear hung (shows only timing ticks). Run against the specific project with `--no-build` after a solution-level `dotnet build` for reliable CI iteration.
