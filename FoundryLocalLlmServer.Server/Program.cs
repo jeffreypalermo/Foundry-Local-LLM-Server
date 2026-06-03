@@ -13,6 +13,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.AddHttpClient();
 builder.Services.Configure<FoundryLocalOptions>(builder.Configuration.GetSection(FoundryLocalOptions.SectionName));
+builder.Services.Configure<OllamaFallbackOptions>(builder.Configuration.GetSection(OllamaFallbackOptions.SectionName));
 
 // Mutable Foundry endpoint — updated by auto-discovery at startup and on connection failures
 string? _currentFoundryEndpoint = null;
@@ -169,6 +170,30 @@ bool IsGpuVariant(string modelId)
 
 bool ModelIdMatchesAlias(string modelId, string alias)
 {
+    if (ModelIdMatchesAliasCore(modelId, alias))
+        return true;
+
+    // Accept aliases both with and without a dash between the family name and version:
+    // "gemma4" <-> "gemma-4", "phi4" <-> "phi-4".
+    var dashedAlias = Regex.Replace(alias, "(?<=[A-Za-z])(?=\\d)", "-");
+    if (!string.Equals(dashedAlias, alias, StringComparison.OrdinalIgnoreCase)
+        && ModelIdMatchesAliasCore(modelId, dashedAlias))
+    {
+        return true;
+    }
+
+    var compactAlias = alias.Replace("-", string.Empty, StringComparison.Ordinal);
+    if (!string.Equals(compactAlias, alias, StringComparison.OrdinalIgnoreCase)
+        && ModelIdMatchesAliasCore(modelId, compactAlias))
+    {
+        return true;
+    }
+
+    return false;
+}
+
+bool ModelIdMatchesAliasCore(string modelId, string alias)
+{
     if (string.Equals(modelId, alias, StringComparison.OrdinalIgnoreCase)) return true;
     if (modelId.StartsWith(alias + ":", StringComparison.OrdinalIgnoreCase)) return true;
     if (!modelId.StartsWith(alias + "-", StringComparison.OrdinalIgnoreCase)) return false;
@@ -289,151 +314,276 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
     });
 });
 
-app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, ILogger<Program> logger, CancellationToken cancellationToken) =>
+app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IOptions<OllamaFallbackOptions> ollamaOptions, IHttpClientFactory httpClientFactory, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
+    var requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+    var foundryOptions = options.Value;
+    var ollama = ollamaOptions.Value;
+
+    if (foundryOptions.UseStubResponses)
+    {
+        var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
+        var model = requestPayload?["model"]?.GetValue<string>() ?? foundryOptions.Model;
+        var stubResponse = OpenAiChatHelpers.CreateStubResponse(model, prompt);
+
+        return Results.Json(stubResponse);
+    }
+
+    // Try Foundry first, unless fallback-only mode is enabled
+    bool foundryFailed = false;
     try
     {
-        var requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
-        var foundryOptions = options.Value;
-
-        if (foundryOptions.UseStubResponses)
-        {
-            var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
-            var model = requestPayload?["model"]?.GetValue<string>() ?? foundryOptions.Model;
-            var stubResponse = OpenAiChatHelpers.CreateStubResponse(model, prompt);
-
-            return Results.Json(stubResponse);
-        }
-
         // Resolve alias → actual Foundry model ID and learn the model's token cap
-        int maxTokensCap = 0;
-        var currentEndpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint);
-        string? originalModelAlias = null;
-        if (requestPayload?["model"] is JsonNode modelNode)
-        {
-            var requestedModel = modelNode.GetValue<string>();
-            originalModelAlias = requestedModel;
-            logger.LogInformation("Resolving model alias: {Model} → endpoint {Endpoint}", requestedModel, currentEndpoint);
-            var (resolvedModel, cap) = await ResolveModelAsync(requestedModel, currentEndpoint, httpClientFactory);
-            maxTokensCap = cap;
-            logger.LogInformation("Resolved model: {Resolved} (cap={Cap})", resolvedModel, cap);
-            if (!string.Equals(requestedModel, resolvedModel, StringComparison.OrdinalIgnoreCase))
-                requestPayload["model"] = resolvedModel;
-        }
-
-        // Cap max_tokens to the model's total context window to prevent OOM/400 errors
-        var effectiveCap = maxTokensCap > 0 ? maxTokensCap : DefaultMaxTokensFallback;
-        if (requestPayload?["max_tokens"] is JsonNode maxTokensNode)
-        {
-            var requested = maxTokensNode.GetValue<int>();
-            if (requested > effectiveCap)
+            int maxTokensCap = 0;
+            var currentEndpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint);
+            string? originalModelAlias = null;
+            if (requestPayload?["model"] is JsonNode modelNode)
             {
-                logger.LogInformation("Capping max_tokens from {Requested} to {Cap}", requested, effectiveCap);
-                requestPayload["max_tokens"] = effectiveCap;
+                var requestedModel = modelNode.GetValue<string>();
+                originalModelAlias = requestedModel;
+                logger.LogInformation("Resolving model alias: {Model} → endpoint {Endpoint}", requestedModel, currentEndpoint);
+                var (resolvedModel, cap) = await ResolveModelAsync(requestedModel, currentEndpoint, httpClientFactory);
+                maxTokensCap = cap;
+                logger.LogInformation("Resolved model: {Resolved} (cap={Cap})", resolvedModel, cap);
+                if (!string.Equals(requestedModel, resolvedModel, StringComparison.OrdinalIgnoreCase))
+                    requestPayload["model"] = resolvedModel;
             }
-        }
 
-        var isStreaming = requestPayload?["stream"]?.GetValue<bool>() == true;
-        var payloadJson = requestPayload?.ToJsonString() ?? "{}";
-
-        // Serialize requests — Foundry Local crashes on concurrent streaming requests
-        await _foundryRequestGate.WaitAsync(cancellationToken);
-        try
-        {
-        // Try the request, and if Foundry is unreachable, re-discover and retry once
-        for (int attempt = 0; attempt < 2; attempt++)
-        {
-            var endpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint, forceRediscovery: attempt > 0);
-            if (attempt > 0)
+            // Cap max_tokens to the model's total context window to prevent OOM/400 errors
+            var effectiveCap = maxTokensCap > 0 ? maxTokensCap : DefaultMaxTokensFallback;
+            if (requestPayload?["max_tokens"] is JsonNode maxTokensNode)
             {
-                // Clear model caches so alias resolution uses the new endpoint
-                aliasCache.Clear();
-                cachedModelsExpiry = DateTime.MinValue;
-
-                // Ensure the model is loaded on the (possibly restarted) Foundry instance
-                var modelToLoad = originalModelAlias ?? foundryOptions.Model;
-                await EnsureModelLoadedAsync(modelToLoad, logger);
-
-                // Re-resolve model alias against the new endpoint
-                if (requestPayload?["model"] is JsonNode retryModelNode)
+                var requested = maxTokensNode.GetValue<int>();
+                if (requested > effectiveCap)
                 {
-                    var retryRequested = retryModelNode.GetValue<string>();
-                    var (retryResolved, retryCap) = await ResolveModelAsync(retryRequested, endpoint, httpClientFactory);
-                    if (!string.Equals(retryRequested, retryResolved, StringComparison.OrdinalIgnoreCase))
-                        requestPayload["model"] = retryResolved;
-                    payloadJson = requestPayload?.ToJsonString() ?? "{}";
+                    logger.LogInformation("Capping max_tokens from {Requested} to {Cap}", requested, effectiveCap);
+                    requestPayload["max_tokens"] = effectiveCap;
                 }
-
-                logger.LogInformation("Retry with re-discovered endpoint: {Endpoint}", endpoint);
             }
 
-            var targetUri = new Uri(new Uri(endpoint), "/v1/chat/completions");
-            logger.LogInformation("Proxying to {TargetUri} (stream={Stream}, attempt={Attempt})", targetUri, isStreaming, attempt);
+            var isStreaming = requestPayload?["stream"]?.GetValue<bool>() == true;
+            var payloadJson = requestPayload?.ToJsonString() ?? "{}";
 
+            // Serialize requests — Foundry Local crashes on concurrent streaming requests
+            await _foundryRequestGate.WaitAsync(cancellationToken);
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
+                // Try the request, and if Foundry is unreachable, re-discover and retry once
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
-                    Content = new StringContent(payloadJson),
-                };
-                request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+                    var endpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint, forceRediscovery: attempt > 0);
+                    if (attempt > 0)
+                    {
+                        // Clear model caches so alias resolution uses the new endpoint
+                        aliasCache.Clear();
+                        cachedModelsExpiry = DateTime.MinValue;
 
-                if (!string.IsNullOrWhiteSpace(foundryOptions.ApiKey))
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", foundryOptions.ApiKey);
+                        // Ensure the model is loaded on the (possibly restarted) Foundry instance
+                        var modelToLoad = originalModelAlias ?? foundryOptions.Model;
+                        await EnsureModelLoadedAsync(modelToLoad, logger);
 
-                var proxyClient = httpClientFactory.CreateClient();
-                using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                        // Re-resolve model alias against the new endpoint
+                        if (requestPayload?["model"] is JsonNode retryModelNode)
+                        {
+                            var retryRequested = retryModelNode.GetValue<string>();
+                            var (retryResolved, retryCap) = await ResolveModelAsync(retryRequested, endpoint, httpClientFactory);
+                            if (!string.Equals(retryRequested, retryResolved, StringComparison.OrdinalIgnoreCase))
+                                requestPayload["model"] = retryResolved;
+                            payloadJson = requestPayload?.ToJsonString() ?? "{}";
+                        }
 
-                if (isStreaming && response.IsSuccessStatusCode)
-                {
-                    context.Response.StatusCode = (int)response.StatusCode;
-                    context.Response.ContentType = "text/event-stream";
-                    context.Response.Headers.CacheControl = "no-cache";
-                    context.Response.Headers.Connection = "keep-alive";
+                        logger.LogInformation("Retry with re-discovered endpoint: {Endpoint}", endpoint);
+                    }
+
+                    var targetUri = new Uri(new Uri(endpoint), "/v1/chat/completions");
+                    logger.LogInformation("Proxying to {TargetUri} (stream={Stream}, attempt={Attempt})", targetUri, isStreaming, attempt);
+
                     try
                     {
-                        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                        await stream.CopyToAsync(context.Response.Body, cancellationToken);
+                        using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
+                        {
+                            Content = new StringContent(payloadJson),
+                        };
+                        request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+
+                        if (!string.IsNullOrWhiteSpace(foundryOptions.ApiKey))
+                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", foundryOptions.ApiKey);
+
+                        var proxyClient = httpClientFactory.CreateClient();
+                        using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                        if (isStreaming && response.IsSuccessStatusCode)
+                        {
+                            context.Response.StatusCode = (int)response.StatusCode;
+                            context.Response.ContentType = "text/event-stream";
+                            context.Response.Headers.CacheControl = "no-cache";
+                            context.Response.Headers.Connection = "keep-alive";
+                            try
+                            {
+                                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                                await stream.CopyToAsync(context.Response.Body, cancellationToken);
+                            }
+                            catch (Exception ex) when (ex is HttpRequestException or IOException)
+                            {
+                                // Foundry died mid-stream; send [DONE] so the client doesn't hang
+                                logger.LogWarning(ex, "SSE stream interrupted, sending [DONE] to client");
+                                try { await context.Response.WriteAsync("\ndata: [DONE]\n\n"); } catch { }
+                            }
+                            return Results.Empty;
+                        }
+                        
+                        // If streaming but failed, or non-streaming with error, fall back to Ollama
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            logger.LogWarning("Foundry returned error {StatusCode}, will try Ollama fallback", response.StatusCode);
+                            foundryFailed = true;
+                            break; // exit retry loop to try Ollama
+                        }
+
+                        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                        
+                        // If Foundry returned an error, try Ollama fallback
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            logger.LogWarning("Foundry returned error {StatusCode}, will try Ollama fallback", response.StatusCode);
+                            foundryFailed = true;
+                            break; // exit retry loop to try Ollama
+                        }
+                        
+                        return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
                     }
-                    catch (Exception ex) when (ex is HttpRequestException or IOException)
+                    catch (HttpRequestException) when (attempt == 0)
                     {
-                        // Foundry died mid-stream; send [DONE] so the client doesn't hang
-                        logger.LogWarning(ex, "SSE stream interrupted, sending [DONE] to client");
-                        try { await context.Response.WriteAsync("\ndata: [DONE]\n\n"); } catch { }
+                        logger.LogWarning("Foundry unreachable at {Endpoint}, attempting re-discovery...", endpoint);
+                        continue; // retry with re-discovery
                     }
-                    return Results.Empty;
                 }
 
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+                // Should not reach here, but handle gracefully
+                logger.LogWarning("Foundry Local unavailable after all attempts");
+                foundryFailed = true;
             }
-            catch (HttpRequestException) when (attempt == 0)
+            finally
             {
-                logger.LogWarning("Foundry unreachable at {Endpoint}, attempting re-discovery...", endpoint);
-                continue; // retry with re-discovery
+                _foundryRequestGate.Release();
             }
-        }
+            
+            // If Foundry failed and Ollama is enabled, try Ollama
+            if (foundryFailed && ollama.Enabled)
+            {
+                logger.LogWarning("Foundry Local failed, routing to Ollama fallback");
+                
+                // Extract data from the already-parsed requestPayload
+                var messages = requestPayload?["messages"];
+                var model = requestPayload?["model"]?.GetValue<string>() ?? ollama.Model;
+                var stream = requestPayload?["stream"]?.GetValue<bool>() ?? false;
+                var maxTokens = requestPayload?["max_tokens"]?.GetValue<int>();
+                
+                // Create a new payload for Ollama with cloned messages
+                var ollamaBody = new JsonObject
+                {
+                    ["model"] = model,
+                    ["messages"] = messages != null ? JsonNode.Parse(messages.ToJsonString()) : null,
+                    ["stream"] = stream,
+                };
+                
+                if (maxTokens.HasValue && maxTokens > 0)
+                    ollamaBody["num_predict"] = maxTokens;
+                
+                var targetUri = new Uri(new Uri(ollama.Endpoint), "/api/chat");
+                logger.LogInformation("Proxying to Ollama at {TargetUri} (stream={Stream})", targetUri, stream);
+                
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
+                    {
+                        Content = new StringContent(ollamaBody.ToJsonString()),
+                    };
+                    request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+                    
+                    var proxyClient = httpClientFactory.CreateClient();
+                    proxyClient.Timeout = TimeSpan.FromMinutes(5);
+                    using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    
+                    if (stream && response.IsSuccessStatusCode)
+                    {
+                        context.Response.StatusCode = (int)response.StatusCode;
+                        context.Response.ContentType = "text/event-stream";
+                        context.Response.Headers.CacheControl = "no-cache";
+                        context.Response.Headers.Connection = "keep-alive";
+                        try
+                        {
+                            await using var stream_response = await response.Content.ReadAsStreamAsync(cancellationToken);
+                            using var reader = new StreamReader(stream_response);
+                            string? line;
+                            while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+                            {
+                                if (line.StartsWith("data: "))
+                                {
+                                    var jsonStr = line["data: ".Length..];
+                                    try
+                                    {
+                                        var ollamaJson = JsonNode.Parse(jsonStr);
+                                        var openAiChunk = ConvertOllamaToOpenAiFormat(ollamaJson, model);
+                                        await context.Response.WriteAsync($"data: {openAiChunk.ToJsonString()}\n\n", cancellationToken);
+                                    }
+                                    catch { }
+                                }
+                            }
+                            await context.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+                        }
+                        catch (Exception streamEx)
+                        {
+                            logger.LogWarning(streamEx, "Ollama stream interrupted");
+                            try { await context.Response.WriteAsync("\ndata: [DONE]\n\n"); } catch { }
+                        }
+                        return Results.Empty;
+                    }
+                    
+                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    
+                    // Convert Ollama response to OpenAI format
+                    if (response.IsSuccessStatusCode && !string.IsNullOrEmpty(body))
+                    {
+                        try
+                        {
+                            var ollamaResp = JsonNode.Parse(body);
+                            var openAiResp = ConvertOllamaToOpenAiFormat(ollamaResp, model);
+                            return Results.Json(openAiResp);
+                        }
+                        catch { }
+                    }
+                    
+                    return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+                }
+                catch (HttpRequestException ollamaEx)
+                {
+                    logger.LogError(ollamaEx, "Ollama also unavailable at {Endpoint}", ollama.Endpoint);
+                    return Results.Problem(
+                        title: "All LLM Backends Unavailable",
+                        detail: $"Foundry Local and Ollama are unavailable. Ensure at least one service is running.",
+                        statusCode: 503);
+                }
+            }
 
-        // Should not reach here, but handle gracefully
-        return Results.Problem(title: "Foundry Local Unavailable", statusCode: 503);
-        }
-        finally
-        {
-            _foundryRequestGate.Release();
-        }
-    }
-    catch (HttpRequestException ex)
-    {
-        var foundryOptions = options.Value;
-        logger.LogError(ex, "Foundry Local unavailable after retry at {Endpoint}", foundryOptions.Endpoint);
+            // If we get here, Foundry failed and Ollama is either disabled or also unavailable
+            if (foundryFailed)
+            {
+                return Results.Problem(
+                    title: "Foundry Local Unavailable",
+                    detail: "Foundry Local is unavailable and Ollama fallback is not enabled.",
+                    statusCode: 503);
+            }
+
+        // This shouldn't be reached, but return a generic error just in case
         return Results.Problem(
-            title: "Foundry Local Unavailable",
-            detail: $"Could not reach Foundry Local. Ensure the service is running. ({ex.Message})",
-            statusCode: 503);
+            title: "Internal Server Error",
+            detail: "Unexpected error in chat completions handler.",
+            statusCode: 500);
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Unhandled error in /v1/chat/completions");
+        logger.LogError(ex, "Unhandled exception in /v1/chat/completions");
         return Results.Problem(
             title: "Internal Server Error",
             detail: ex.Message,
@@ -444,6 +594,56 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
 app.MapDefaultEndpoints();
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+// Helper function to convert Ollama format to OpenAI format
+JsonObject ConvertOllamaToOpenAiFormat(JsonNode? ollamaNode, string model)
+{
+    var response = new JsonObject
+    {
+        ["id"] = $"chatcmpl-{Guid.NewGuid():N}",
+        ["object"] = "chat.completion",
+        ["created"] = (int)(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
+        ["model"] = model,
+        ["choices"] = new JsonArray(),
+        ["usage"] = new JsonObject
+        {
+            ["prompt_tokens"] = 0,
+            ["completion_tokens"] = 0,
+            ["total_tokens"] = 0,
+        }
+    };
+    
+    var choices = (JsonArray)response["choices"]!;
+    var message = new JsonObject();
+    
+    if (ollamaNode is JsonObject ollamaObj)
+    {
+        // Extract message content from Ollama response
+        if (ollamaObj["message"] is JsonObject msgObj && msgObj["content"] is JsonValue contentVal)
+        {
+            var content = contentVal.GetValue<string>();
+            message["role"] = "assistant";
+            message["content"] = content;
+        }
+        
+        // Parse tokens if available
+        var promptTokens = ollamaObj["prompt_eval_count"]?.GetValue<int>() ?? 0;
+        var completionTokens = ollamaObj["eval_count"]?.GetValue<int>() ?? 0;
+        
+        ((JsonObject)response["usage"]!)["prompt_tokens"] = promptTokens;
+        ((JsonObject)response["usage"]!)["completion_tokens"] = completionTokens;
+        ((JsonObject)response["usage"]!)["total_tokens"] = promptTokens + completionTokens;
+    }
+    
+    choices.Add(new JsonObject
+    {
+        ["index"] = 0,
+        ["message"] = message.Count > 0 ? message : new JsonObject { ["role"] = "assistant", ["content"] = "" },
+        ["finish_reason"] = "stop",
+    });
+    
+    return response;
+}
 
 app.Run();
 
