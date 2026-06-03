@@ -2,7 +2,33 @@
 
 ## Active Decisions
 
-### 1. Proxy Error Handling for Foundry Local Unavailability
+### 1. Opus 4.8 vs Gemma4 Routing by Squad Role
+
+**Date:** 2026-06-02  
+**Author:** Neo  
+**Status:** Accepted
+
+**Context:** The squad needs explicit, unambiguous model routing so high-stakes reasoning work consistently uses the strongest model, while operational/support roles stay on a fast local model.
+
+**Decision:**
+- Add explicit model registry entries in `.squad/config.json`:
+  - `opus48` -> `claude-opus-4.8`
+  - `gemma4_ollama` -> `ollama/gemma4`
+- Route members by role:
+  - **Opus 4.8:** Neo, Trinity, Tank, Switch
+  - **Gemma4 (Ollama):** Apoc, Scribe, Ralph
+- Align each member charter model section to reference the exact config key and concrete backing model.
+
+**Rationale:** Lead architecture, implementation, and test strategy require stronger long-chain reasoning and higher confidence under ambiguity. Logging, monitoring, and routine infra workflows are mostly procedural/summarization-heavy and benefit from local low-latency throughput.
+
+**Consequences:**
+- Routing is now deterministic across config and charters.
+- The squad reduces premium-model usage where it provides limited marginal value.
+- Escalation remains possible through documented fallback paths for exceptional complexity.
+
+---
+
+### 2. Proxy Error Handling for Foundry Local Unavailability
 
 **Date:** 2026-05-11  
 **Author:** Apoc  
@@ -19,7 +45,7 @@
 
 ---
 
-### 2. opencode uses foundry-local provider for phi-4
+### 3. opencode uses foundry-local provider for phi-4
 
 **Date:** 2026-05-11  
 **Author:** Apoc  
