@@ -33,3 +33,13 @@
 - **Proxy 503 error handling** (commit 396b3ee): No integration test coverage yet — feature added but untested
 - **opencode local provider** setup: No integration test coverage yet — feature added but untested
 - **Recommendation:** Add environment variable to disable auto-start in FoundryServiceHelper, or create CI-safe test configuration
+
+**2026-06-03: Phi 4 mini Foundry Local GPU integration tests (primary path)**
+- Added `PhiFoundryGpuIntegrationTests.cs` covering the Foundry-only GPU path for `phi-4-mini`.
+- Tests: non-streaming completion, streaming SSE, OpenAI-schema validation, and an error case for an unavailable model.
+- All tagged `[Trait("Category", "GPU-Required")]` and use `SkippableFact` so CI (stub-only, no GPU) can filter or self-skip.
+- **Key design choice:** new `PhiFoundryServerFactory` sets `FoundryLocal:UseStubResponses=false` AND `OllamaFallback:Enabled=false`. Disabling Ollama is the only reliable way to prove the error case never silently falls back — with fallback on, a Foundry failure is masked by an Ollama completion.
+- **GPU assertion:** `FoundryServiceHelper.IsGpuModelAvailableAsync` is used as a guard so a GPU test can't accidentally pass on a CPU/NPU variant.
+- **Proxy behavior confirmed (Program.cs):** with fallback disabled, a non-2xx Foundry response returns HTTP 503 "Foundry Local Unavailable"; the error case asserts non-success + body is not a `chat.completion`.
+- **Coverage gap remaining:** these tests are human-attended (require GPU + Foundry running). No GPU-free way exists to validate real CUDA inference. The `foundry service start` auto-start in `FoundryServiceHelper` (noted 2026-05-12) still applies — these tests inherit that and rely on Skip when discovery fails.
+- Build verified: `dotnet build` on the IntegrationTests project succeeds (0 warnings, 0 errors).
