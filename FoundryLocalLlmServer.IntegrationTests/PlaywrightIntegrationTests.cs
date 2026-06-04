@@ -21,18 +21,20 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task AppHost_SendPrompt_ReturnsAssistantResponse()
+    public async Task AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu()
     {
+        const string modelAlias = "gemma-4";
+
         // Ensure Foundry Local is running and has at least one GPU model
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
-        Assert.True(foundryUrl != null && await FoundryServiceHelper.IsRunningAsync(),
+        Assert.NotNull(foundryUrl);
+        Assert.True(await FoundryServiceHelper.IsRunningAsync(),
             "Foundry Local is not running. Start it with 'foundry service start'.");
 
-        // Use phi-4-mini as it's relatively small but capable
-        _output.WriteLine("Ensuring GPU model ready: phi-4-mini");
-        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync("phi-4-mini", _output);
+        _output.WriteLine($"Ensuring GPU model ready: {modelAlias}");
+        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync(modelAlias, _output);
         Assert.True(modelReady,
-            "Could not load GPU variant of phi-4-mini.");
+            $"Could not load GPU variant of {modelAlias}.");
 
         // Verify wwwroot exists (frontend must be pre-built)
         var serverProjectDir = Path.GetFullPath(
@@ -43,11 +45,18 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
 
         // Ensure Playwright browsers are installed
         _output.WriteLine("Ensuring Playwright browsers are installed...");
-        Microsoft.Playwright.Program.Main(["install", "chromium", "--with-deps"]);
+        try
+        {
+            Microsoft.Playwright.Program.Main(["install", "chromium", "--with-deps"]);
+        }
+        catch (Exception ex)
+        {
+            Assert.Fail($"Playwright browser install failed: {ex.Message}");
+        }
 
-        // Start the proxy server with phi-4-mini as the configured model
+        // Start the proxy server with gemma as the configured model
         var serverExePath = GetServerExePath();
-        var serverProcess = StartServer(serverExePath, foundryUrl!, "phi-4-mini");
+        var serverProcess = StartServer(serverExePath, foundryUrl!, modelAlias);
 
         try
         {
@@ -73,6 +82,10 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
                 Timeout = 10000,
             });
             _output.WriteLine("Page loaded successfully.");
+
+            // Verify the frontend is configured to use gemma
+            var configLineText = await page.Locator("p.config-line strong").First.TextContentAsync();
+            Assert.Contains("gemma", configLineText ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
             // Verify the page has the default prompt in the textarea
             var textarea = page.Locator("textarea");
@@ -128,6 +141,9 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
                 Timeout = 5000,
             });
 
+            Assert.True(await FoundryServiceHelper.IsGpuModelAvailableAsync(modelAlias),
+                $"Expected a GPU-loaded Foundry model variant for alias '{modelAlias}'.");
+
             _output.WriteLine("✅ Playwright test passed — Send Prompt works end-to-end.");
         }
         finally
@@ -158,7 +174,7 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
         return exePath;
     }
 
-    private static Process StartServer(string exePath, string foundryEndpoint, string model = "phi-4")
+    private static Process StartServer(string exePath, string foundryEndpoint, string model = "gemma-4")
     {
         // Set WorkingDirectory to the server project directory so ASP.NET Core
         // finds the wwwroot folder for static file serving.

@@ -38,8 +38,11 @@ public class OpenCodeIntegrationTests
     {
         // Foundry Local GPU service must be available
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
-        Assert.True(foundryUrl != null && await FoundryServiceHelper.IsRunningAsync(),
+        Assert.NotNull(foundryUrl);
+        Assert.True(await FoundryServiceHelper.IsRunningAsync(),
             "Foundry Local is not running. Start it with 'foundry service start'.");
+        Assert.True(await IsCommandAvailableAsync("opencode"),
+            "opencode CLI is not installed or not available on PATH.");
 
         // Ensure the GPU variant of phi-4-mini is downloaded and loaded
         // (phi-4-mini has 131K context, sufficient for opencode's tool-calling system prompt;
@@ -201,4 +204,31 @@ public class OpenCodeIntegrationTests
 
     private static string StripAnsiCodes(string input) =>
         AnsiEscapePattern.Replace(input, string.Empty);
+
+    private static async Task<bool> IsCommandAvailableAsync(string command)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(command)
+            {
+                Arguments = "--version",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null)
+                return false;
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(cts.Token);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

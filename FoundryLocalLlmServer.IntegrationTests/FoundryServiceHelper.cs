@@ -360,6 +360,30 @@ internal static class FoundryServiceHelper
     /// </summary>
     internal static bool ModelIdMatchesAlias(string modelId, string alias)
     {
+        if (ModelIdMatchesAliasCore(modelId, alias))
+            return true;
+
+        // Accept aliases both with and without a dash between the family name and version:
+        // "gemma4" <-> "gemma-4", "phi4" <-> "phi-4".
+        var dashedAlias = Regex.Replace(alias, "(?<=[A-Za-z])(?=\\d)", "-");
+        if (!string.Equals(dashedAlias, alias, StringComparison.OrdinalIgnoreCase)
+            && ModelIdMatchesAliasCore(modelId, dashedAlias))
+        {
+            return true;
+        }
+
+        var compactAlias = alias.Replace("-", string.Empty, StringComparison.Ordinal);
+        if (!string.Equals(compactAlias, alias, StringComparison.OrdinalIgnoreCase)
+            && ModelIdMatchesAliasCore(modelId, compactAlias))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ModelIdMatchesAliasCore(string modelId, string alias)
+    {
         if (string.Equals(modelId, alias, StringComparison.OrdinalIgnoreCase)) return true;
         if (modelId.StartsWith(alias + ":", StringComparison.OrdinalIgnoreCase)) return true;
         if (!modelId.StartsWith(alias + "-", StringComparison.OrdinalIgnoreCase)) return false;

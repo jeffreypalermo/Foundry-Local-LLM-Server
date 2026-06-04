@@ -28,7 +28,7 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
 
         var response = await client.PostAsJsonAsync("/v1/chat/completions", new
         {
-            model = "phi-4",
+            model = "gemma4",
             messages = new[]
             {
                 new { role = "user", content = "summarize this test" },
@@ -56,7 +56,7 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
         };
 
         var sdkClient = new ChatClient(
-            "phi-4",
+            "gemma4",
             new ApiKeyCredential("local-test-key"),
             options);
 
@@ -72,19 +72,8 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
     }
 }
 
-public sealed class ServerFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public sealed class ServerFactory : WebApplicationFactory<Program>
 {
-    private string? _foundryUrl;
-
-    async Task IAsyncLifetime.InitializeAsync()
-    {
-        _foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync()
-            ?? throw new InvalidOperationException(
-                "Foundry Local is not running. Start it with 'foundry service start'.");
-    }
-
-    Task IAsyncLifetime.DisposeAsync() => Task.CompletedTask;
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -93,11 +82,9 @@ public sealed class ServerFactory : WebApplicationFactory<Program>, IAsyncLifeti
         {
             var config = new Dictionary<string, string?>
             {
-                ["FoundryLocal:Model"] = "phi-4",
+                ["FoundryLocal:Model"] = "gemma4",
+                ["FoundryLocal:UseStubResponses"] = "true",
             };
-
-            if (_foundryUrl != null)
-                config["FoundryLocal:Endpoint"] = _foundryUrl;
 
             configBuilder.AddInMemoryCollection(config);
         });
