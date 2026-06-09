@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using FoundryLocalLlmServer.Server;
 using Microsoft.Extensions.Options;
 
@@ -10,135 +8,64 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.Services.AddProblemDetails();
-builder.Services.AddOpenApi();
 builder.Services.AddHttpClient();
 builder.Services.Configure<FoundryLocalOptions>(builder.Configuration.GetSection(FoundryLocalOptions.SectionName));
 
-// Mutable Foundry endpoint — updated by auto-discovery at startup and on connection failures
-string? _currentFoundryEndpoint = null;
-var _endpointLock = new SemaphoreSlim(1, 1);
+// In-process Foundry Local v1.2 SDK bootstrap: registers the CUDA EP, downloads/loads
+// the model, and starts the SDK's embedded OpenAI-compatible web service in the
+// background. Endpoints return 503 with readiness detail until it is ready.
+builder.Services.AddSingleton<FoundryLocalBootstrapper>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<FoundryLocalBootstrapper>());
 
-// Serialize requests to Foundry — concurrent streaming requests crash the service
+// Serialize requests to Foundry — concurrent streaming requests crash the runtime
 var _foundryRequestGate = new SemaphoreSlim(1, 1);
-
-async Task<string?> DiscoverFoundryEndpointAsync()
-{
-    try
-    {
-        using var proc = Process.Start(new ProcessStartInfo("foundry")
-        {
-            Arguments = "service start",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-        if (proc != null)
-        {
-            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
-            var stderrTask = proc.StandardError.ReadToEndAsync();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await proc.WaitForExitAsync(cts.Token);
-            var combined = await stdoutTask + await stderrTask;
-            var match = Regex.Match(combined, @"(?:running|started)\s+on\s+(http://[^\s/]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-                return match.Groups[1].Value.TrimEnd('/');
-        }
-    }
-    catch { /* Foundry CLI not available */ }
-    return null;
-}
-
-async Task EnsureModelLoadedAsync(string modelAlias, ILogger logger)
-{
-    try
-    {
-        logger.LogInformation("Loading model {Model} on Foundry...", modelAlias);
-        using var proc = Process.Start(new ProcessStartInfo("foundry")
-        {
-            Arguments = $"model load {modelAlias} --device GPU --ttl 7200",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-        if (proc != null)
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            await proc.WaitForExitAsync(cts.Token);
-            var output = await proc.StandardOutput.ReadToEndAsync();
-            logger.LogInformation("Model load result: {Output}", output.Trim());
-        }
-    }
-    catch (Exception ex) { logger.LogWarning(ex, "Model load failed for {Model}", modelAlias); }
-}
-
-async Task<string> GetFoundryEndpointAsync(string configuredEndpoint, bool forceRediscovery = false)
-{
-    if (!forceRediscovery && _currentFoundryEndpoint != null)
-        return _currentFoundryEndpoint;
-
-    await _endpointLock.WaitAsync();
-    try
-    {
-        if (!forceRediscovery && _currentFoundryEndpoint != null)
-            return _currentFoundryEndpoint;
-
-        // Check if current endpoint is reachable
-        var endpointToCheck = _currentFoundryEndpoint ?? configuredEndpoint;
-        try
-        {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            var resp = await http.GetAsync($"{endpointToCheck}/v1/models");
-            if (resp.IsSuccessStatusCode)
-            {
-                _currentFoundryEndpoint = endpointToCheck;
-                return _currentFoundryEndpoint;
-            }
-        }
-        catch { /* not reachable */ }
-
-        // Discover via CLI
-        var discovered = await DiscoverFoundryEndpointAsync();
-        _currentFoundryEndpoint = discovered ?? configuredEndpoint;
-        return _currentFoundryEndpoint;
-    }
-    finally
-    {
-        _endpointLock.Release();
-    }
-}
-
-// Auto-discover Foundry Local endpoint at startup
-if (!builder.Configuration.GetValue<bool>("FoundryLocal:UseStubResponses"))
-{
-    var configuredEndpoint = builder.Configuration["FoundryLocal:Endpoint"] ?? "http://127.0.0.1:5273";
-    var discovered = await GetFoundryEndpointAsync(configuredEndpoint);
-    if (discovered != configuredEndpoint)
-    {
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["FoundryLocal:Endpoint"] = discovered
-        });
-    }
-}
 
 var app = builder.Build();
 
 app.UseExceptionHandler();
 
-if (app.Environment.IsDevelopment())
+// Readiness gate: null when ready, otherwise a 503 ProblemDetails describing progress.
+IResult? NotReadyProblem(FoundryLocalBootstrapper bootstrapper)
 {
-    app.MapOpenApi();
+    var status = bootstrapper.Status;
+    if (status.State == FoundryReadinessState.Ready)
+        return null;
+
+    var detail = status.State switch
+    {
+        FoundryReadinessState.NotStarted => "Foundry Local initialization has not started yet.",
+        FoundryReadinessState.CreatingManager => "Initializing the Foundry Local runtime...",
+        FoundryReadinessState.RegisteringExecutionProvider =>
+            $"Downloading/registering execution provider {status.ExecutionProvider} ({status.EpDownloadPercent:F1}%). First run can take a long time.",
+        FoundryReadinessState.DownloadingModel =>
+            $"Downloading model {status.ModelId} ({status.ModelDownloadPercent:F1}%).",
+        FoundryReadinessState.LoadingModel => $"Loading model {status.ModelId} into GPU memory...",
+        FoundryReadinessState.StartingWebService => "Starting the Foundry inference service...",
+        FoundryReadinessState.Failed => $"Foundry Local initialization failed: {status.LastError}",
+        _ => "Foundry Local is not ready.",
+    };
+
+    return Results.Problem(
+        title: "Foundry Local Not Ready",
+        detail: detail,
+        statusCode: 503,
+        extensions: new Dictionary<string, object?> { ["foundryStatus"] = status });
 }
 
-app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
+app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options, FoundryLocalBootstrapper bootstrapper) =>
 {
     var value = options.Value;
     return Results.Ok(new
     {
-        value.Endpoint,
+        Endpoint = bootstrapper.Endpoint ?? value.Endpoint,
         value.Model,
+        bootstrapper.Status.State,
     });
 });
+
+// Detailed readiness/status: state, EP + model download progress, last error.
+app.MapGet("/api/foundry/status", (FoundryLocalBootstrapper bootstrapper) =>
+    Results.Ok(bootstrapper.Status));
 
 // Cache of alias → (resolvedId, maxTotalTokens) — cleared when /v1/models is refreshed.
 // maxTotalTokens = maxInputTokens + maxOutputTokens as reported by Foundry.
@@ -252,12 +179,28 @@ async Task<(string ResolvedId, int MaxTokens)> ResolveModelAsync(string requeste
     return result;
 }
 
-app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory) =>
+app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, FoundryLocalBootstrapper bootstrapper) =>
 {
+    var foundryOptions = options.Value;
+
+    if (foundryOptions.UseStubResponses)
+    {
+        return Results.Ok(new
+        {
+            @object = "list",
+            data = new[]
+            {
+                new { id = foundryOptions.Model, @object = "model", created = 0, owned_by = "foundry-local" }
+            }
+        });
+    }
+
+    if (NotReadyProblem(bootstrapper) is IResult notReady)
+        return notReady;
+
     aliasCache.Clear(); // refresh alias cache when models are re-queried
 
-    var endpoint = await GetFoundryEndpointAsync(options.Value.Endpoint);
-    var foundryModels = await GetFoundryModelsAsync(endpoint, httpClientFactory, forceRefresh: true);
+    var foundryModels = await GetFoundryModelsAsync(bootstrapper.Endpoint!, httpClientFactory, forceRefresh: true);
 
     // If Foundry returned real models, proxy them through; otherwise return the configured default
     if (foundryModels.Length > 0)
@@ -289,7 +232,7 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
     });
 });
 
-app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, ILogger<Program> logger, CancellationToken cancellationToken) =>
+app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, FoundryLocalBootstrapper bootstrapper, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
     try
     {
@@ -305,16 +248,19 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
             return Results.Json(stubResponse);
         }
 
+        // 503 with readiness detail until the in-process runtime is fully up
+        if (NotReadyProblem(bootstrapper) is IResult notReady)
+            return notReady;
+
+        var endpoint = bootstrapper.Endpoint!;
+
         // Resolve alias → actual Foundry model ID and learn the model's token cap
         int maxTokensCap = 0;
-        var currentEndpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint);
-        string? originalModelAlias = null;
         if (requestPayload?["model"] is JsonNode modelNode)
         {
             var requestedModel = modelNode.GetValue<string>();
-            originalModelAlias = requestedModel;
-            logger.LogInformation("Resolving model alias: {Model} → endpoint {Endpoint}", requestedModel, currentEndpoint);
-            var (resolvedModel, cap) = await ResolveModelAsync(requestedModel, currentEndpoint, httpClientFactory);
+            logger.LogInformation("Resolving model alias: {Model} → endpoint {Endpoint}", requestedModel, endpoint);
+            var (resolvedModel, cap) = await ResolveModelAsync(requestedModel, endpoint, httpClientFactory);
             maxTokensCap = cap;
             logger.LogInformation("Resolved model: {Resolved} (cap={Cap})", resolvedModel, cap);
             if (!string.Equals(requestedModel, resolvedModel, StringComparison.OrdinalIgnoreCase))
@@ -336,86 +282,47 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
         var isStreaming = requestPayload?["stream"]?.GetValue<bool>() == true;
         var payloadJson = requestPayload?.ToJsonString() ?? "{}";
 
-        // Serialize requests — Foundry Local crashes on concurrent streaming requests
+        // Serialize requests — Foundry crashes on concurrent streaming requests
         await _foundryRequestGate.WaitAsync(cancellationToken);
         try
         {
-        // Try the request, and if Foundry is unreachable, re-discover and retry once
-        for (int attempt = 0; attempt < 2; attempt++)
-        {
-            var endpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint, forceRediscovery: attempt > 0);
-            if (attempt > 0)
-            {
-                // Clear model caches so alias resolution uses the new endpoint
-                aliasCache.Clear();
-                cachedModelsExpiry = DateTime.MinValue;
-
-                // Ensure the model is loaded on the (possibly restarted) Foundry instance
-                var modelToLoad = originalModelAlias ?? foundryOptions.Model;
-                await EnsureModelLoadedAsync(modelToLoad, logger);
-
-                // Re-resolve model alias against the new endpoint
-                if (requestPayload?["model"] is JsonNode retryModelNode)
-                {
-                    var retryRequested = retryModelNode.GetValue<string>();
-                    var (retryResolved, retryCap) = await ResolveModelAsync(retryRequested, endpoint, httpClientFactory);
-                    if (!string.Equals(retryRequested, retryResolved, StringComparison.OrdinalIgnoreCase))
-                        requestPayload["model"] = retryResolved;
-                    payloadJson = requestPayload?.ToJsonString() ?? "{}";
-                }
-
-                logger.LogInformation("Retry with re-discovered endpoint: {Endpoint}", endpoint);
-            }
-
             var targetUri = new Uri(new Uri(endpoint), "/v1/chat/completions");
-            logger.LogInformation("Proxying to {TargetUri} (stream={Stream}, attempt={Attempt})", targetUri, isStreaming, attempt);
+            logger.LogInformation("Proxying to {TargetUri} (stream={Stream})", targetUri, isStreaming);
 
-            try
+            using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, targetUri)
+                Content = new StringContent(payloadJson),
+            };
+            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+
+            if (!string.IsNullOrWhiteSpace(foundryOptions.ApiKey))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", foundryOptions.ApiKey);
+
+            var proxyClient = httpClientFactory.CreateClient();
+            using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            if (isStreaming && response.IsSuccessStatusCode)
+            {
+                context.Response.StatusCode = (int)response.StatusCode;
+                context.Response.ContentType = "text/event-stream";
+                context.Response.Headers.CacheControl = "no-cache";
+                context.Response.Headers.Connection = "keep-alive";
+                try
                 {
-                    Content = new StringContent(payloadJson),
-                };
-                request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
-
-                if (!string.IsNullOrWhiteSpace(foundryOptions.ApiKey))
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", foundryOptions.ApiKey);
-
-                var proxyClient = httpClientFactory.CreateClient();
-                using var response = await proxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-                if (isStreaming && response.IsSuccessStatusCode)
-                {
-                    context.Response.StatusCode = (int)response.StatusCode;
-                    context.Response.ContentType = "text/event-stream";
-                    context.Response.Headers.CacheControl = "no-cache";
-                    context.Response.Headers.Connection = "keep-alive";
-                    try
-                    {
-                        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                        await stream.CopyToAsync(context.Response.Body, cancellationToken);
-                    }
-                    catch (Exception ex) when (ex is HttpRequestException or IOException)
-                    {
-                        // Foundry died mid-stream; send [DONE] so the client doesn't hang
-                        logger.LogWarning(ex, "SSE stream interrupted, sending [DONE] to client");
-                        try { await context.Response.WriteAsync("\ndata: [DONE]\n\n"); } catch { }
-                    }
-                    return Results.Empty;
+                    await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                    await stream.CopyToAsync(context.Response.Body, cancellationToken);
                 }
-
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+                catch (Exception ex) when (ex is HttpRequestException or IOException)
+                {
+                    // Inference died mid-stream; send [DONE] so the client doesn't hang
+                    logger.LogWarning(ex, "SSE stream interrupted, sending [DONE] to client");
+                    try { await context.Response.WriteAsync("\ndata: [DONE]\n\n"); } catch { }
+                }
+                return Results.Empty;
             }
-            catch (HttpRequestException) when (attempt == 0)
-            {
-                logger.LogWarning("Foundry unreachable at {Endpoint}, attempting re-discovery...", endpoint);
-                continue; // retry with re-discovery
-            }
-        }
 
-        // Should not reach here, but handle gracefully
-        return Results.Problem(title: "Foundry Local Unavailable", statusCode: 503);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
         }
         finally
         {
@@ -424,11 +331,10 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     }
     catch (HttpRequestException ex)
     {
-        var foundryOptions = options.Value;
-        logger.LogError(ex, "Foundry Local unavailable after retry at {Endpoint}", foundryOptions.Endpoint);
+        logger.LogError(ex, "Foundry Local inference service unreachable");
         return Results.Problem(
             title: "Foundry Local Unavailable",
-            detail: $"Could not reach Foundry Local. Ensure the service is running. ({ex.Message})",
+            detail: $"Could not reach the in-process Foundry inference service. ({ex.Message})",
             statusCode: 503);
     }
     catch (Exception ex)

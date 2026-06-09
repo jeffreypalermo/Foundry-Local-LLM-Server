@@ -10,22 +10,25 @@
 - `FoundryLocalLlmServer.UnitTests` - unit tests
 - `FoundryLocalLlmServer.IntegrationTests` - integration tests (including Microsoft.Extensions.AI chat abstraction)
 
-## Foundry Local model choice for RTX 5090
+## In-process Foundry Local runtime (v1.2 SDK)
 
-The server defaults to `phi-4` (`FoundryLocal:Model`), a high-capability model documented in Foundry Local getting-started guidance and suitable for high-end NVIDIA hardware such as RTX 5090-class GPUs.
+The server hosts Foundry Local **in-process** via the `Microsoft.AI.Foundry.Local.WinML` v1.2 .NET SDK — no separate `foundry` CLI/service is required. On startup, a background bootstrapper:
 
-## Run Foundry Local
+1. Initializes the Foundry Local runtime (`FoundryLocalManager`).
+2. Downloads and registers **only** the configured execution provider (default `CUDAExecutionProvider`). The first run downloads the CUDA EP (hundreds of MB) — be patient; the per-attempt timeout defaults to 90 minutes.
+3. Downloads (if needed) and loads the configured model (default `phi-4-mini`), preferring the GPU variant. GPU is mandatory by default (`FoundryLocal:RequireGpu`) — there is no silent CPU fallback.
+4. Starts the SDK's embedded OpenAI-compatible web service that the proxy forwards to.
 
-```bash
-foundry model run phi-4 --port 5273
-```
+Until initialization completes, `/v1/chat/completions` and `/v1/models` return `503` with a ProblemDetails payload describing progress. Poll `GET /api/foundry/status` for detailed state (phase, EP/model download percent, last error).
 
-The app is configured to use:
+Key settings (`FoundryLocal` section in `FoundryLocalLlmServer.Server/appsettings*.json` or environment variables):
 
-- Foundry endpoint: `http://127.0.0.1:5273`
-- Model: `phi-4`
+- `Model` — model alias to load (default `phi-4-mini`)
+- `ExecutionProvider` — ONNX Runtime EP to register (default `CUDAExecutionProvider`)
+- `RequireGpu` — fail startup if no GPU variant exists (default `true`)
+- `InitializationTimeoutMinutes` / `MaxInitializationAttempts` — first-run download resilience
 
-You can override in `FoundryLocalLlmServer.Server/appsettings*.json` or environment variables.
+> Note: the server targets `net10.0-windows` (WinML requirement) and runs on Windows x64.
 
 ## Run the Aspire app
 
@@ -38,9 +41,9 @@ dotnet run --project ./FoundryLocalLlmServer.AppHost/FoundryLocalLlmServer.AppHo
 Point your OpenAI-compatible CLI/tooling to this app's server endpoint and model:
 
 - Base URL: `http://localhost:<server-port>/v1`
-- Model: `phi-4`
+- Model: `phi-4-mini`
 
-For example, configure your tool with `base_url=http://localhost:5057/v1` and `model=phi-4` when the server is running on port `5057`.
+For example, configure your tool with `base_url=http://localhost:5057/v1` and `model=phi-4-mini` when the server is running on port `5057`.
 
 ## Tests
 
