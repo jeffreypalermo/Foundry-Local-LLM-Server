@@ -102,6 +102,8 @@ public sealed class FoundryLocalBootstrapper(
         _status = new FoundryStatus(
             FoundryReadinessState.CreatingManager, opts.ExecutionProvider, 0, 0, null, null, null, attempt, DateTimeOffset.UtcNow);
 
+        // Single-threaded by design: only this BackgroundService's sequential retry
+        // loop calls InitializeAsync, so the IsInitialized check cannot race.
         if (!FoundryLocalManager.IsInitialized)
         {
             await FoundryLocalManager.CreateAsync(
@@ -153,10 +155,7 @@ public sealed class FoundryLocalBootstrapper(
         var model = await catalog.GetModelAsync(opts.Model, ct)
             ?? throw new InvalidOperationException($"Model '{opts.Model}' not found in the Foundry catalog.");
 
-        var gpuVariant = model.Variants.FirstOrDefault(v =>
-                v.Info?.Runtime?.DeviceType == DeviceType.GPU &&
-                (v.Info.Runtime.ExecutionProvider?.Contains(opts.ExecutionProvider, StringComparison.OrdinalIgnoreCase) ?? false))
-            ?? model.Variants.FirstOrDefault(v => v.Info?.Runtime?.DeviceType == DeviceType.GPU);
+        var gpuVariant = SelectGpuVariant(model, opts.ExecutionProvider);
         if (gpuVariant is not null)
         {
             model.SelectVariant(gpuVariant);
@@ -194,6 +193,23 @@ public sealed class FoundryLocalBootstrapper(
 
         _status = _status with { State = FoundryReadinessState.Ready, Endpoint = endpoint, LastError = null };
         logger.LogInformation("Foundry Local ready: model {ModelId} on {Endpoint}", model.Id, endpoint);
+    }
+
+    /// <summary>
+    /// Picks the model variant that runs on GPU, preferring the one built for the
+    /// configured execution provider (e.g. the *-cuda-gpu variant for CUDA).
+    /// Returns null when the model has no GPU variant.
+    /// </summary>
+    private static IModel? SelectGpuVariant(IModel model, string executionProvider)
+    {
+        var gpuVariants = model.Variants
+            .Where(v => v.Info?.Runtime?.DeviceType == DeviceType.GPU)
+            .ToArray();
+
+        var epMatch = gpuVariants.FirstOrDefault(v =>
+            v.Info!.Runtime!.ExecutionProvider?.Contains(executionProvider, StringComparison.OrdinalIgnoreCase) == true);
+
+        return epMatch ?? gpuVariants.FirstOrDefault();
     }
 
     public override void Dispose()
