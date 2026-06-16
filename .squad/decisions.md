@@ -181,6 +181,104 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
+### 9. Supported Foundry Local Models — Authoritative Determination (RTX 4060, 8 GB)
+
+**Date:** 2026-06-16  
+**Author:** Apoc (DevOps / Infra)  
+**Status:** Determined — live GPU verification on Jeffrey Palermo's RTX 4060 Laptop (8 GB)  
+**Requested by:** Jeffrey Palermo
+
+**Context:** Multi-model support requires an authoritative list of models that load coherently on the target GPU and support tool calling for opencode integration.
+
+**Decision:**
+In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested against candidate models on RTX 4060 8 GB. Each model was downloaded via `POST /api/models/select` (EP-aware CUDA variant selection), then two probes were run: coherence (>10 chars, not degenerate) and tool calling (OpenAI `tool_calls` object, not text).
+
+**Verified Supported Set:**
+- **qwen2.5-1.5b**: coherent ✅, proper OpenAI `tool_calls` ✅, ~2.5 GB VRAM, **default model & best for opencode**
+- **qwen2.5-0.5b**: coherent ✅, prose-only (no tool calling), ~1.8 GB VRAM, lightweight fallback
+
+**Excluded Candidates:**
+- **phi-4-mini** (`Phi-4-mini-instruct-cuda-gpu:5`): degenerate output (token-0 `!!!!`), incompatible 8-bit artifact on 1.2.3
+- **qwen2.5-coder-7b**: XML-wrapped tool calls (not parsed), 95% VRAM (7791/8188 MiB), OOM-risk headroom
+- **qwen2.5-7b**: 7B class ~7.8 GB (95% VRAM); unverified due to CDN throttling
+- **qwen2.5-coder-3b**: does not exist in catalog
+
+**Configuration Committed:**
+```json
+"FoundryLocal": {
+  "Model": "qwen2.5-1.5b",
+  "AvailableModels": [ "qwen2.5-1.5b", "qwen2.5-0.5b" ]
+}
+```
+
+**Consequences:** Multi-model backend/UI can be tested against an authoritative, live-verified set. Tool calling via opencode is now reliably supported. Tank and Switch can assume this exact set.
+
+---
+
+### 10. API Contract — Model Listing & Switching (Backend)
+
+**Date:** 2026-06-16  
+**Author:** Tank (Backend Dev)  
+**Status:** Implemented — backend ready for Trinity (UI) and Switch (tests)  
+**Requested by:** Jeffrey Palermo
+
+**Context:** The multi-model feature requires runtime model switching without redeploying the server.
+
+**Decision:**
+- Add `GET /api/models` — returns configured candidate models with live state (`loaded`, `cached`, `active`). Response shape is `{ object: "list", active: alias, data: [{ id, loaded, cached, active }] }`.
+- Add `POST /api/models/select` — switches the active model. Request body is `{ model: alias }`. Response returns `{ active, id (full variant name), device, executionProvider, loaded }` on success, or RFC7807 ProblemDetails (400/503) on error.
+- Configuration `FoundryLocal:AvailableModels` drives the selectable set; adding an alias to the array is all that is needed for expansion.
+- In-memory active model state (`_activeModel`) initialized from `FoundryLocal:Model` at startup. Mutations guarded by `_foundryRequestGate` (prevents races with in-flight chat).
+- Stub mode returns configured list with `loaded=false`, `device="stub"`, `executionProvider=null`.
+
+**Constraints Respected:** Foundry-Local-only (no Ollama), 503 ProblemDetails on unavailability, CUDA EP-aware variant selection, CI stub mode, `win-x64` RID.
+
+**Verification:** Build 0 errors, unit tests 2/2 passed, integration tests 4/4 passed. `--filter "Category!=GPU-Required&Category!=Integration"` GREEN.
+
+---
+
+### 11. Model Picker Dropdown + Hot-Swap (Frontend)
+
+**Date:** 2026-06-16T15:35:27-05:00  
+**Author:** Trinity (Frontend Dev)  
+**Status:** Implemented (proposed for ratification)  
+**Requested by:** Jeffrey Palermo
+
+**Context:** UI needs a user-facing way to switch models at runtime, leveraging Tank's new backend endpoints.
+
+**Decision:**
+- Add labeled `<select id="model-select">` in a new `div.model-picker` directly under the config line. Preserve `p.config-line > strong` (Playwright-critical).
+- Populate from `GET /api/models` on mount; annotate options with ` • loaded` / ` • cached` status indicators.
+- On selection change: `POST /api/models/select { model }`. During the in-flight switch, disable select/textarea/Send button, set `aria-busy`, and show `span.switching-status` "Switching model… (unloading + loading on GPU)".
+- On success: update `activeModel`, `models[].active` flags, and `config.model` (config line follows). Subsequent chat sends `model: activeModel ?? config.model`.
+- On error: parse RFC7807 ProblemDetails into existing `p.error` style; select reverts to still-active model (no optimistic mutation).
+
+**Constraints Respected:** Frontend-only, all Playwright-critical selectors preserved, TypeScript strict, `npm run build` 0 errors, `npx eslint src` clean.
+
+---
+
+### 12. Parameterized Per-Model Integration Test Harness
+
+**Date:** 2026-06-16  
+**Author:** Switch (Tester)  
+**Status:** Implemented  
+**Requested by:** Jeffrey Palermo
+
+**Context:** Integration tests must verify both Tank's model endpoints and per-model coherence/tool-calling, but without hardcoding a single model.
+
+**Decision:**
+- Model set is **configuration-driven**: read `FoundryLocal:AvailableModels` from `appsettings.json` in `SupportedModelData.cs`; static fallback `["qwen2.5-1.5b","qwen2.5-0.5b"]` if unreadable.
+- **Capability matrix** (empirical, not config): tool-calling support is encoded as `ToolCallingCapableAliases = { "qwen2.5-1.5b" }`. `[MemberData]` source `SupportedModels()` yields `(alias, supportsToolCalls)` rows.
+- **Structural tests** (CI, stub mode, no GPU): GET `/api/models` lists configured set; POST `/api/models/select` returns stub shape per model; unknown model returns 400.
+- **GPU-Required tests** (`[SkippableTheory]`, `[Trait("Category","GPU-Required")]`): per-model load, coherence, tool-calling assertions.
+- **Precondition-gated tests now SKIP (not FAIL):** Three pre-existing integration tests (`AspireGenerationIntegrationTests`, `OpenCodeIntegrationTests`, `PlaywrightIntegrationTests`, plus 4 `PhiFoundryGpuIntegrationTests`) converted from `[Fact]`→`[SkippableFact]` / `[Theory]`→`[SkippableTheory]`, guard with `Skip.If/IfNot`. `AspireGenerationIntegrationTests` now targets `SupportedGenerationModels` (reads config) instead of hardcoded phi-4-mini; `OpenCodeIntegrationTests` uses `SupportedModelData.DefaultModel` (qwen2.5-1.5b).
+
+**Verification:** Build 0 errors. `--filter "Category!=GPU-Required"` → Unit 2 passed, Integration 8 passed, 0 failed. `--filter "Category=GPU-Required"` → 14 skipped, 0 failed.
+
+**Consequences:** Adding a model to `appsettings.json` automatically includes it in integration tests; no test code changes needed. CI is now GREEN without GPU. GPU dev box retains full coverage.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

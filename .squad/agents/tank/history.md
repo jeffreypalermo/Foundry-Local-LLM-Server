@@ -55,3 +55,26 @@
 - **Model default → `qwen2.5-0.5b`:** switched from `phi-4-mini-instruct-cuda-gpu:5` (whose GPU artifact yields token-0 garbage on 1.2.3) to `qwen2.5-0.5b-instruct-cuda-gpu:4` (proven coherent on GPU in live end-to-end test). Updated both `appsettings.json` and `appsettings.Development.json`.
 - **End-to-end proof (Apoc 2026-06-16):** AppHost launched (0 console errors after clearing stale Aspire orphan sockets), Playwright clicked "Send Prompt", received 2586-char coherent reply (p.error=0, finish_reason=stop). nvidia-smi: VRAM +1537 MiB, util 77–82%, server.exe in compute-apps. Foundry log: "Loaded model (device=GPU)".
 - **Decision #4 status:** In-process 1.2.3 WinML runtime resolves token-0 for compatible artifacts (qwen2.5-0.5b = coherent now; phi-4-mini = still token-0, waiting on compatible artifact from Microsoft). End-to-end proven live on RTX 4060.
+
+### 2026-06-16 — Model listing & runtime model-switch API (backend slice)
+
+- **New endpoints** (OpenAI `GET /v1/models` left untouched):
+  - `GET /api/models` — lists selectable models with live state. Response:
+    `{ "object": "list", "active": "<alias>", "data": [ { "id": "<alias>", "loaded": bool, "cached": bool, "active": bool } ] }`.
+    `loaded` from `catalog.GetLoadedModelsAsync()` (matched by `IModel.Alias`), `cached` from `IModel.IsCachedAsync()`, `active` = current in-memory active model. Works in stub mode / pre-init (state defaults false; list still returned).
+  - `POST /api/models/select` — body `{ "model": "<alias>" }`. Validates alias ∈ `AvailableModels` (400 if not). Under `_foundryRequestGate`: unloads loaded model(s) via `IModel.UnloadAsync()`, resolves alias, `SelectGpuVariant` (CUDA/EP-aware, excludes OpenVINO), downloads if not cached, `LoadAsync()`, updates active model, clears `aliasCache` + `cachedModelsExpiry`. Success: `{ "active", "id", "device", "executionProvider", "loaded": true }`. Stub mode: records alias only, `{ "active", "id": null, "device": "stub", "executionProvider": null, "loaded": false }`. Errors as ProblemDetails: 400 invalid/unknown, 503 runtime not initialized (no Ollama fallback), 500 load failed (server stays usable, reloads on next chat).
+- **Config key:** `FoundryLocal:AvailableModels` (string[]) added to `FoundryLocalOptions` + both appsettings, seeded `["qwen2.5-0.5b"]`. Expanding the selectable set = add aliases to config, no code change. Empty → falls back to `[activeModel]`.
+- **Active-model state:** in-memory `_activeModel` in `Program.cs`, initialized from `FoundryLocal:Model` (startup default), overridden by `/api/models/select`. `/v1/chat/completions` now defaults the `model` field to `_activeModel` when the request omits it (both stub and proxy paths); retry-path reload also uses `_activeModel`. All mutations under `_foundryRequestGate` so a switch never races in-flight chat.
+- **Verification:** `dotnet build -c Debug` (win-x64) → 0 errors (2 pre-existing unused-var warnings). `dotnet test --filter "Category!=GPU-Required&Category!=Integration"` → UnitTests 2/2, IntegrationTests 4/4 passed.
+- **Contract published:** `.squad/decisions/inbox/tank-model-switch-api.md` for Trinity (UI) and Switch (tests).
+
+### 2026-06-16 — Supported model set finalized: qwen2.5-1.5b (default) + qwen2.5-0.5b
+
+**Per Apoc's live GPU verification on RTX 4060:**
+- **Default model:** `qwen2.5-1.5b` (coherent + proper OpenAI `tool_calls`; ~2.5 GB VRAM)
+- **Fallback:** `qwen2.5-0.5b` (coherent, prose-only; ~1.8 GB VRAM)
+- **`FoundryLocal:AvailableModels` configuration:** `["qwen2.5-1.5b", "qwen2.5-0.5b"]` (committed to both appsettings)
+
+Excluded: phi-4-mini (token-0 degenerate on 1.2.3), all 7B models (95% VRAM on 8 GB → OOM-risk), qwen2.5-coder-3b (not in catalog).
+
+The config-driven `AvailableModels` array now drives the `/api/models` list returned by GET and validated by POST. Any future model add/remove is a simple config edit with no code change required.
