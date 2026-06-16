@@ -43,3 +43,12 @@
 - **Proxy behavior confirmed (Program.cs):** with fallback disabled, a non-2xx Foundry response returns HTTP 503 "Foundry Local Unavailable"; the error case asserts non-success + body is not a `chat.completion`.
 - **Coverage gap remaining:** these tests are human-attended (require GPU + Foundry running). No GPU-free way exists to validate real CUDA inference. The `foundry service start` auto-start in `FoundryServiceHelper` (noted 2026-05-12) still applies — these tests inherit that and rely on Skip when discovery fails.
 - Build verified: `dotnet build` on the IntegrationTests project succeeds (0 warnings, 0 errors).
+
+**2026-06-16: Frontend Chat UI Refresh — Newest-on-Top + Dark Theme**
+- Trinity redesigned `frontend/src/App.tsx`, `App.css`, and `index.css` for improved UX.
+- **Chat ordering:** Newest exchange now on top via `groupExchanges` helper; user stays paired with its own assistant reply. In-flight pending bubble shows at top while busy.
+- **Theme:** Explicit, self-contained dark palette (slate-blue surfaces, indigo accent) replaces OS-dependent pastels. User = blue-tinted with blue border; Assistant = violet-tinted with violet border. WCAG AA contrast.
+- **Button/input styling:** Consistent hover/focus/disabled/busy states throughout.
+- **Playwright selectors:** All protected: `button[type='submit']` (Send/Running), `article.message.user/assistant`, `p.error`, `p.config-line > strong`.
+- Build: `npm run build` ✅, `npx eslint src` ✅ (2 pre-existing errors in spec files only, out of scope).
+- ⚠️ **Note for future ordering assertions:** Newest exchange is now `.article.message.assistant p` `.First == newest reply, not oldest.
