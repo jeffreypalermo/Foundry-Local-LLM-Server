@@ -34,9 +34,9 @@
 
 ## Model
 
-- **Preferred:** auto
-- **Rationale:** Config and infra = fast tier; complex pipeline work = standard
-- **Fallback:** Standard chain
+- **Preferred:** gemma4_ollama (`ollama/gemma4`)
+- **Rationale:** Routine CI/infra maintenance is mostly procedural and latency-sensitive.
+- **Fallback:** opus48 (`claude-opus-4.8`) for complex incident-level reasoning
 
 ## Collaboration
 

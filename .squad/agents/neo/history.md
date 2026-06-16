@@ -15,3 +15,6 @@
 - **User:** Jeffrey Palermo
 
 ## Learnings
+
+- **2026-06-02T22:26:49.967-05:00:** Built and validated backend (`dotnet build`, `dotnet test`) and confirmed core server endpoints locally on `http://localhost:5537` (`/health`, `/api/foundry`, `/v1/models`, `/v1/chat/completions`). Added environment-gated integration behavior: OpenAI compatibility tests now run in stub mode, while live Foundry/opencode/Playwright tests skip when prerequisites are absent.
+- **2026-06-02T22:56:05.612-05:00:** Squad model routing is now explicit and role-based in `.squad/config.json`: Neo/Trinity/Tank/Switch use `opus48` (`claude-opus-4.8`), while Apoc/Scribe/Ralph use `gemma4_ollama` (`ollama/gemma4`), and charters must reference these exact keys to avoid ambiguity.

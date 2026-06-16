@@ -10,20 +10,20 @@
 - `FoundryLocalLlmServer.UnitTests` - unit tests
 - `FoundryLocalLlmServer.IntegrationTests` - integration tests (including Microsoft.Extensions.AI chat abstraction)
 
-## Foundry Local model choice for RTX 5090
+## Foundry Local default model
 
-The server defaults to `phi-4` (`FoundryLocal:Model`), a high-capability model documented in Foundry Local getting-started guidance and suitable for high-end NVIDIA hardware such as RTX 5090-class GPUs.
+The server defaults to `gemma4` (`FoundryLocal:Model`).
 
 ## Run Foundry Local
 
 ```bash
-foundry model run phi-4 --port 5273
+foundry model run gemma4 --port 5273
 ```
 
 The app is configured to use:
 
 - Foundry endpoint: `http://127.0.0.1:5273`
-- Model: `phi-4`
+- Model: `gemma4`
 
 You can override in `FoundryLocalLlmServer.Server/appsettings*.json` or environment variables.
 
@@ -38,9 +38,9 @@ dotnet run --project ./FoundryLocalLlmServer.AppHost/FoundryLocalLlmServer.AppHo
 Point your OpenAI-compatible CLI/tooling to this app's server endpoint and model:
 
 - Base URL: `http://localhost:<server-port>/v1`
-- Model: `phi-4`
+- Model: `gemma4`
 
-For example, configure your tool with `base_url=http://localhost:5057/v1` and `model=phi-4` when the server is running on port `5057`.
+For example, configure your tool with `base_url=http://localhost:5057/v1` and `model=gemma4` when the server is running on port `5057`.
 
 ## Tests
 
@@ -48,4 +48,4 @@ For example, configure your tool with `base_url=http://localhost:5057/v1` and `m
 dotnet test ./FoundryLocalLlmServer.sln
 ```
 
-Integration tests run with `FoundryLocal:UseStubResponses=true` so they are fully automated and do not require a GPU during CI.
+The OpenAI-compatibility integration tests run with `FoundryLocal:UseStubResponses=true` and do not require a GPU. Live Foundry/opencode/Playwright integration tests are skipped automatically when prerequisites are unavailable.

@@ -33,9 +33,9 @@
 
 ## Model
 
-- **Preferred:** auto
-- **Rationale:** Code = standard tier; config/docs = fast
-- **Fallback:** Standard chain
+- **Preferred:** opus48 (`claude-opus-4.8`)
+- **Rationale:** Backend protocol handling and API contract work require high-confidence reasoning.
+- **Fallback:** `gemma4_ollama` for lightweight drafts/diagnostics only
 
 ## Collaboration
 

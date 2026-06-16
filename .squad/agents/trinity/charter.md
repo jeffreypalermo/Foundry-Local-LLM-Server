@@ -33,9 +33,9 @@
 
 ## Model
 
-- **Preferred:** auto
-- **Rationale:** Code tasks use standard tier; research uses fast
-- **Fallback:** Standard chain
+- **Preferred:** opus48 (`claude-opus-4.8`)
+- **Rationale:** Frontend implementation with contract-sensitive behavior benefits from stronger reasoning.
+- **Fallback:** `gemma4_ollama` for lightweight drafts only
 
 ## Collaboration
 

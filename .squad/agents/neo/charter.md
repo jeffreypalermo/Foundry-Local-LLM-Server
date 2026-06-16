@@ -35,9 +35,9 @@
 
 ## Model
 
-- **Preferred:** auto
-- **Rationale:** Architecture proposals get premium; triage and planning get fast
-- **Fallback:** Standard chain — coordinator handles automatically
+- **Preferred:** opus48 (`claude-opus-4.8`)
+- **Rationale:** Lead architecture and cross-cutting trade-offs need the strongest reasoning path.
+- **Fallback:** `gemma4_ollama` for lightweight diagnostics only
 
 ## Collaboration
 

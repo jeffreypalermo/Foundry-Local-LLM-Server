@@ -10,3 +10,6 @@
 - **User:** Jeffrey Palermo
 
 ## Learnings
+
+- **2026-06-02T22:26:49.967-05:00:** `npm ci` currently fails in `frontend/` because `package-lock.json` is out of sync (`@emnapi/core` and `@emnapi/runtime` missing). `npm install --include=dev` followed by `npm run lint` and `npm run build` succeeds.
+- **2026-06-02T22:26:49.967-05:00:** Local frontend validation succeeded with Vite proxying to backend (`SERVER_HTTP`). Happy path (`/api/foundry` + `/v1/chat/completions`) worked with stub responses, and error path returned 503 with clear ProblemDetails text (`Foundry Local Unavailable` / `Could not reach Foundry Local`), which matches UI error parsing behavior.

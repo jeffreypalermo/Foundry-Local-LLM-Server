@@ -251,6 +251,7 @@ The routing table determines **WHO** handles work. After routing, use Response M
 | Ralph commands ("Ralph, go", "keep working", "Ralph, status", "Ralph, idle") | Follow Ralph — Work Monitor (see that section) |
 | General work request | Check routing.md, spawn best match + any anticipatory agents |
 | Quick factual question | Answer directly (no spawn) |
+| Model mapping / who uses what model | Answer directly from `.squad/config.json` and team charters (no spawn) |
 | Ambiguous | Pick the most likely agent; say who you chose |
 | Multi-agent task (auto) | Check `ceremonies.md` for `when: "before"` ceremonies whose condition matches; run before spawning work |
 

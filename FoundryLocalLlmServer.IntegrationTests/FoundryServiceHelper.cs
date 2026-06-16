@@ -291,6 +291,8 @@ internal static class FoundryServiceHelper
         }
     }
 
+
+
     /// <summary>
     /// Ensures a model's GPU variant is downloaded and loaded in Foundry Local.
     /// Downloads if needed, then loads. Returns true if the model is ready for use.
@@ -326,7 +328,6 @@ internal static class FoundryServiceHelper
 
         return true;
     }
-
 
     /// <summary>
     /// Device/backend token words that appear immediately after the alias in Foundry model IDs.
@@ -395,38 +396,38 @@ internal static class FoundryServiceHelper
             || afterAlias.StartsWith(t + ":"));
     }
 
-    private static async Task<string?> DiscoverUrlAsync()
-    {
-        try
-        {
-            var psi = new ProcessStartInfo("foundry")
-            {
-                Arguments = "service start",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
+   private static async Task<string?> DiscoverUrlAsync()
+   {
+       try
+       {
+           var psi = new ProcessStartInfo("foundry")
+           {
+               Arguments = "service start",
+               UseShellExecute = false,
+               RedirectStandardOutput = true,
+               RedirectStandardError = true,
+           };
 
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start foundry process.");
+           using var process = Process.Start(psi)
+               ?? throw new InvalidOperationException("Failed to start foundry process.");
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
+           var stdoutTask = process.StandardOutput.ReadToEndAsync();
+           var stderrTask = process.StandardError.ReadToEndAsync();
 
-            await process.WaitForExitAsync(cts.Token);
+           await process.WaitForExitAsync(cts.Token);
 
-            var combined = (await stdoutTask) + (await stderrTask);
-            var match = ServiceUrlPattern.Match(combined);
-            if (!match.Success)
-                return null;
+           var combined = (await stdoutTask) + (await stderrTask);
+           var match = ServiceUrlPattern.Match(combined);
+           if (!match.Success)
+               return null;
 
-            return match.Groups[1].Value.TrimEnd('/');
-        }
-        catch
-        {
-            return null;
-        }
-    }
+           return match.Groups[1].Value.TrimEnd('/');
+       }
+       catch
+       {
+           return null;
+       }
+   }
 }
