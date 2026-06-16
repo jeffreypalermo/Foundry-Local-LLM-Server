@@ -261,7 +261,7 @@ In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested
 
 **Date:** 2026-06-16  
 **Author:** Switch (Tester)  
-**Status:** Implemented  
+**Status:** Superseded (see #13, #14)  
 **Requested by:** Jeffrey Palermo
 
 **Context:** Integration tests must verify both Tank's model endpoints and per-model coherence/tool-calling, but without hardcoding a single model.
@@ -276,6 +276,71 @@ In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested
 **Verification:** Build 0 errors. `--filter "Category!=GPU-Required"` → Unit 2 passed, Integration 8 passed, 0 failed. `--filter "Category=GPU-Required"` → 14 skipped, 0 failed.
 
 **Consequences:** Adding a model to `appsettings.json` automatically includes it in integration tests; no test code changes needed. CI is now GREEN without GPU. GPU dev box retains full coverage.
+
+**Note (2026-06-16):** This decision's precondition-gate approach via `Skip.If/IfNot` was **reversed** by user directive in Decision #13 below.
+
+---
+
+### 13. No-Skip Integration Tests — All Tests Either PASS or FAIL (Never Skip)
+
+**Date:** 2026-06-16  
+**Author:** Switch (Tester)  
+**Status:** Implemented  
+**Requested by:** Jeffrey Palermo
+
+**Context:** Jeffrey Palermo directed "I don't want to skip tests under any conditions. I'd rather they fail if they can't pass." The preceding Decision #12's `Skip.If/IfNot` mechanism allowed tests to conditionally skip when preconditions (live Foundry service, GPU, opencode CLI, Playwright browser) were missing. This is reversed.
+
+**Decision:**
+Remove every conditional-skip mechanism from `FoundryLocalLlmServer.IntegrationTests` and convert all guarded conditions to hard assertions:
+- `[SkippableFact]` → `[Fact]`
+- `[SkippableTheory]` → `[Theory]`
+- `Skip.If(cond, msg)` → `Assert.False(cond, msg)` (test FAILS if condition is true)
+- `Skip.IfNot(cond, msg)` → `Assert.True(cond, msg)` (test FAILS if condition is false)
+- Playwright browser-install `catch` block with `Skip.If(true, ...)` → `Assert.Fail(...)` (failures no longer masked as skips)
+- Remove all references to `Xunit.SkippableFact` package (not installed; CS0246 fixed as side-effect)
+- Keep `[Trait("Category","GPU-Required")]` and `[Trait("Category","Integration")]` for optional filtering only (they do not skip)
+
+**Verification:**
+- `dotnet build`: 0 errors, 0 warnings (CS0246 resolved)
+- Grep `Skip.` / `SkippableFact` / `SkippableTheory` → 0 matches
+- Full test suite: **Skipped = 0** (no tests skip; 14 fail honestly due to missing preconditions on non-GPU machines)
+
+**Consequences:**
+- CI without GPU: integration tests are reported as FAILED (not skipped), making misconfiguration obvious
+- CI can filter by category (`--filter "Category!=GPU-Required"`) for GPU-free runs
+- Tests themselves never skip; all conditional logic becomes assertions (clear failure messages)
+
+---
+
+### 14. Integration Tests Retargeted to In-Process Server (Final Architecture)
+
+**Date:** 2026-06-16  
+**Author:** Apoc (DevOps / Infra)  
+**Status:** Implemented  
+**Requested by:** Jeffrey Palermo
+
+**Context:** Per Decision #13 (no skips), the integration test suite must PASS on the real GPU machine by reworking away from obsolete external architectures (foundry CLI, opencode CLI, phi-4-mini). The suite must target the in-process Foundry Local server (already running via ASP.NET Core on port 5537) and use the verified supported model set (qwen2.5-1.5b, qwen2.5-0.5b per Decision #9).
+
+**Decision:**
+1. **HTTP-driven service discovery.** `FoundryServiceHelper` no longer shells out to `foundry` or `opencode` CLIs. It drives the in-process server over HTTP: readiness = `GET /api/foundry` (new); model load = `POST /api/models/select {"model":alias}` then poll `GET /api/models` / `GET /v1/models` until loaded.
+2. **Shared `ServerFixture` collection fixture.** Starts the Server EXE once on `:5537` (UseStubResponses=false), publishes frontend/dist if missing, waits for Foundry bootstrap, tears down on dispose (kills process tree, frees VRAM). Tests switch models per-test via `/api/models/select`, reusing cached models. Collections run sequentially (one GPU model at a time).
+3. **Retarget off phi-4-mini.** `PhiFoundryGpuIntegrationTests` → `FoundryGpuIntegrationTests`, exercising generic GPU path on qwen2.5-1.5b (default, tool-calling capable).
+4. **Replace CLI E2E with API-contract tests.** `AspireGenerationIntegrationTests` → `CodeGenerationApiContractTests`; `OpenCodeIntegrationTests` → `OpenCodeApiContractTests`. Validate directly over HTTP the OpenAI-compatible contract: `/v1/models` listing, `/v1/chat/completions` code-gen coherence, `tools` → `tool_calls`. True opencode-CLI E2E not done (CLI not installed); API-contract is the deterministic coverage.
+5. **Playwright live.** Browsers installed programmatically via `Microsoft.Playwright.Program.Main(["install","chromium"])`. Navigates fixture server, clicks protected selectors, asserts response content.
+6. **No skips.** Zero `SkippableFact` / `Skip.*` / `Assert.Skip`. `[Trait("Category",...)]` kept for filtering only.
+7. **Program.cs untouched.** A suspected tool-call 500 was a typo in hand-written curl test body (missing `}`); System.Text.Json rejects invalid JSON. With valid body, server returns proper OpenAI `tool_calls`. Business logic and appsettings model config were NOT changed. Two genuine test-side fixes: (a) don't forbid tool_calls for non-flagged models (qwen2.5-0.5b can emit them), (b) guard `choices[0]` against empty trailing SSE usage frame.
+
+**Verification (live on RTX 4060, 8 GB):**
+- `dotnet build`: 0 errors, 0 warnings
+- `dotnet test`: **24 total, 24 passed, 0 failed, 0 skipped**
+- Grep: 0 matches for `ProcessStartInfo` (`foundry`/`opencode` CLI), 0 `Skip` usages
+- Cleanup: fixture disposed server, VRAM back to 24 MiB idle
+
+**Consequences:**
+- Tests pass unconditionally on the real GPU machine
+- No external CLI dependencies (foundry, opencode) required in test harness
+- In-process server is the only test subject
+- Full suite 24/24 green; zero skips per Decision #13
 
 ---
 
