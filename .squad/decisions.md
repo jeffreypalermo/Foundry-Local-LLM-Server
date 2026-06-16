@@ -162,6 +162,25 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
+### 8. Chat UI — Newest Exchange On Top + Explicit Dark Theme
+
+**Date:** 2026-06-16  
+**Author:** Trinity (Frontend Dev)  
+**Requested by:** Jeffrey Palermo  
+**Status:** Implemented
+
+**Context:** The main page rendered the chat transcript oldest-first with an OS-dependent pastel scheme (`color-scheme: light dark`), giving weak contrast and burying the most recent response below older turns.
+
+**Decision:**
+- Render the transcript newest-first while keeping each User message directly above its own Assistant reply: a render-time `groupExchanges(chat)` folds the flat `chat[]` into `{ user, assistant }` pairs, which are mapped then reversed (not a naive flat reverse). State storage is unchanged. While busy, a "Generating response…" pending bubble shows at the top.
+- Replace the OS-dependent palette with an explicit, self-contained dark theme: bg `#0f172a`, surfaces `#1e293b`/`#273449`, border `#3b4a63`, text `#f1f5f9` (muted `#b6c2d6`), indigo accent `#6366f1`/`#818cf8`. User cards are blue-tinted with a blue left border; assistant cards violet-tinted with a violet left border. Body text targets WCAG AA.
+
+**Constraints respected:** All Playwright-critical selectors preserved (`button[type='submit']` "Send Prompt"/"Running...", `article.message.user`, `article.message.assistant p`, `p.error`, `p.config-line > strong` "Model:"). Frontend-only; `npm run build` passes (tsc + vite, 0 errors), `eslint src` clean.
+
+**Note for testers (Switch):** With newest-on-top, `article.message.assistant p` `.First` now resolves to the MOST RECENT assistant reply (previously oldest). Future ordering assertions should account for this.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
