@@ -67,21 +67,35 @@
 
 **Date:** 2026-06-03  
 **Author:** Apoc (DevOps / Infra)  
-**Status:** Diagnosed — partial mitigation applied; full fix blocked on upstream (Microsoft)  
+**Status:** **Resolved (2026-06-16)** — in-process WinML 1.2.3 delivers coherent GPU inference for compatible artifacts  
 **Requested by:** Jeffrey Palermo (standing directive below)
 
-**Context:** `Phi-4-mini-instruct-cuda-gpu:5` served real GPU completions via Foundry Local on 2026-05-12. As of 2026-06-03 the model can no longer be listed, downloaded, or run—a regression, not a setup mistake. Environment is healthy (RTX 4060 VRAM verified, CUDA/TensorRT EPs auto-registered).
+**Context:** `Phi-4-mini-instruct-cuda-gpu:5` served real GPU completions via Foundry Local on 2026-05-12. As of 2026-06-03 the model could no longer be listed, downloaded, or run—a regression, not a setup mistake. Environment is healthy (RTX 4060 VRAM verified, CUDA/TensorRT EPs auto-registered).
 
 **Root Cause (two layers):**
 1. **Catalog parse crash:** `foundry model list` fails with `"The input does not contain any JSON tokens"` on an empty `promptTemplate` field in the first unfiltered catalog entry (`Phi-4-reasoning-generic-cpu:1`), blocking list/download/run for all models (GitHub issues #752, #757).
-2. **Runtime/artifact version gap:** With Layer 1 worked around, models load and execute on GPU (VRAM 5267→7385 MiB, 93–95% CUDA util), but completions degenerate to constant token id 0. Artifacts were rebuilt for Foundry Local v1.2.0 (released 2026-05-28) using ONNX Runtime 1.26.0; the frozen 0.8.119 runtime is incompatible. No upgrade path exists (winget/GitHub releases stuck at 0.8.119).
+2. **Runtime/artifact version gap:** With Layer 1 worked around, models load and execute on GPU, but completions degenerate to constant token id 0 depending on artifact build/runtime compatibility.
 
-**Decision:**
+**Original Decision (2026-06-03):**
 1. Mitigate Layer 1 by seeding a valid local catalog snapshot (`foundry.modelinfo.json`) into `%USERPROFILE%\.foundry\cache\models\`, then manually finalize hung downloads.
 2. Do NOT treat degenerate output as an app bug or reintroduce Ollama—Layer 2 is upstream Microsoft runtime/artifact incompatibility.
 3. Track real fix: Foundry Local v1.2.0+ must become installable. Re-test GPU serving once available.
 
-**Consequences:** Catalog-parse blocker mitigated; GPU models can be downloaded/loaded/executed again. Coherent chat completions remain blocked until v1.2.0+ ships—independent of any change in this codebase. Application's Foundry-Local-only proxy is correct as-is.
+**2026-06-16 Update (Apoc end-to-end live run):**
+The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned in project) resolves the token-0 degeneration **for compatible artifacts**:
+- `qwen2.5-0.5b-instruct-cuda-gpu:4` (int4-rtn-block-32): **coherent** output; same model was word-salad on 0.8.119 CLI
+- `Phi-4-mini-instruct-cuda-gpu:5` (8-bit MatMulNBits): STILL token-0 (`!!!!`) on 1.2.3; artifact remains incompatible
+
+**End-to-End Proof (2026-06-16):**
+- AppHost launched, zero console errors (after clearing stale Aspire orphan sockets)
+- Playwright clicked "Send Prompt" → received 2586-char coherent reply (`p.error` = 0, `finish_reason=stop`)
+- RTX 4060 proven via nvidia-smi: VRAM 24→1561 MiB, util 77–82%, server.exe in compute-apps, Foundry log shows "Loaded model (device=GPU)"
+
+**Consequences:** 
+- Layer 2 blocker is no longer universal; in-process 1.2.3 serves GPU completions for compatible models.
+- phi-4-mini's 8-bit build is the exception (likely waiting on compatible artifact release from Microsoft).
+- Recommended default model: `qwen2.5-0.5b` (proven coherent on GPU).
+- Application's Foundry-Local-only proxy, Decision #6 CUDA default, and EP-aware variant selection all confirmed working live.
 
 ---
 
