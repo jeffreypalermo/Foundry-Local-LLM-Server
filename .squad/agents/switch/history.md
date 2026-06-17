@@ -109,3 +109,5 @@
 All 14 failures are honest precondition failures (no GPU Foundry service / opencode CLI on this run), exactly as the user prefers. No skip was re-introduced to make them green.
 
 **2026-06-16 — Apoc's final integration test rework:** In-process server HTTP-driven architecture is the final state. Full suite 24/24 green, 0 skips, zero CLI dependencies on RTX 4060. No-skip directive fully implemented.
+
+**2026-06-16 — Apoc VRAM leak fix + context-bounding:** Server now caps per-request context with FoundryLocalOptions.MaxPromptTokens (default 1024) and MaxResponseTokens (default 2048) via OpenAiChatHelpers.ApplyContextBounds in /v1/chat/completions. Fixed VRAM leak (peak 7867→3259 MiB, latency 175–190s→≤16s) caused by unbounded INPUT prompt arena. New RepeatedPromptVramTests (Playwright + nvidia-smi sampler) verifies peak ≤ 5000 MiB; all 25 integration tests passing.

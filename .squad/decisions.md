@@ -28,42 +28,7 @@
 
 ---
 
-### 2. Proxy Error Handling for Foundry Local Unavailability
-
-**Date:** 2026-05-11  
-**Author:** Apoc  
-**Status:** Implemented (commit 396b3ee)
-
-**Context:** During live exploratory testing with Playwright, Foundry Local was not running on port 5273. The `/v1/chat/completions` proxy endpoint had no error handling for network failures.
-
-**Decision:**
-- Return 503 Service Unavailable (not 500) when upstream Foundry Local is unreachable.
-- Include a user-readable `detail` field: "Could not reach Foundry Local at {endpoint}. Ensure the service is running."
-- Frontend parses ProblemDetails and displays the detail/title field in error paragraph.
-
-**Rationale:** 503 is semantically correct for upstream dependency failures. Surfacing the endpoint URL immediately tells developers where to look. No change to happy path or stub mode.
-
----
-
-### 3. opencode uses foundry-local provider for phi-4
-
-**Date:** 2026-05-11  
-**Author:** Apoc  
-**Status:** Accepted
-
-**Context:** The project runs an ASP.NET Core proxy server at port 5537 that forwards OpenAI-compatible requests to Microsoft Foundry Local (GPU inference engine). opencode can use any OpenAI-compatible endpoint.
-
-**Decision:**
-- Configure opencode to use the local Foundry Local LLM server as a custom provider named `foundry-local`, targeting `phi-4` at `http://localhost:5537/v1`.
-- Add `GET /v1/models` endpoint to `Program.cs` (required by opencode's SDK for model discovery).
-- Add `foundry-local` provider entry to `~/.config/opencode/opencode.json` (user-level global config).
-
-**Consequences:**
-- `opencode run --model foundry-local/phi-4 "prompt"` works without any API key.
-- Foundry Local GPU service must be running on port 5273 for real inference.
-- opencode config is user-specific (not committed to repo).
-
-### 4. Foundry Local phi-4-mini GPU Root-Cause — Catalog Regression on Stuck Build 0.8.119
+### 2. Foundry Local phi-4-mini GPU Root-Cause — Catalog Regression on Stuck Build 0.8.119
 
 **Date:** 2026-06-03  
 **Author:** Apoc (DevOps / Infra)  
@@ -99,7 +64,7 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
-### 5. User Directive — Foundry Local Only, No Ollama, GPU-Bound
+### 3. User Directive — Foundry Local Only, No Ollama, GPU-Bound
 
 **Date:** 2026-06-03T21:38:34-05:00  
 **Author:** Jeffrey Palermo (via Copilot)  
@@ -109,7 +74,7 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
-### 6. CUDA as the Explicit, Config-Driven GPU Execution Provider
+### 4. CUDA as the Explicit, Config-Driven GPU Execution Provider
 
 **Date:** 2026-06-16  
 **Author:** Tank (Backend Dev)  
@@ -131,7 +96,7 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
-### 7. Remove Ollama Fallback — Restore In-Process Foundry Local Integration
+### 5. Remove Ollama Fallback — Restore In-Process Foundry Local Integration
 
 **Date:** 2026-06-03  
 **Author:** Tank (Backend Dev)  
@@ -162,7 +127,7 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
-### 8. Chat UI — Newest Exchange On Top + Explicit Dark Theme
+### 6. Chat UI — Newest Exchange On Top + Explicit Dark Theme
 
 **Date:** 2026-06-16  
 **Author:** Trinity (Frontend Dev)  
@@ -181,7 +146,7 @@ The in-process `Microsoft.AI.Foundry.Local.WinML` 1.2.3 runtime (already pinned 
 
 ---
 
-### 9. Supported Foundry Local Models — Authoritative Determination (RTX 4060, 8 GB)
+### 7. Supported Foundry Local Models — Authoritative Determination (RTX 4060, 8 GB)
 
 **Date:** 2026-06-16  
 **Author:** Apoc (DevOps / Infra)  
@@ -215,7 +180,7 @@ In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested
 
 ---
 
-### 10. API Contract — Model Listing & Switching (Backend)
+### 8. API Contract — Model Listing & Switching (Backend)
 
 **Date:** 2026-06-16  
 **Author:** Tank (Backend Dev)  
@@ -237,7 +202,7 @@ In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested
 
 ---
 
-### 11. Model Picker Dropdown + Hot-Swap (Frontend)
+### 9. Model Picker Dropdown + Hot-Swap (Frontend)
 
 **Date:** 2026-06-16T15:35:27-05:00  
 **Author:** Trinity (Frontend Dev)  
@@ -257,7 +222,7 @@ In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested
 
 ---
 
-### 12. Parameterized Per-Model Integration Test Harness
+### 10. Parameterized Per-Model Integration Test Harness
 
 **Date:** 2026-06-16  
 **Author:** Switch (Tester)  
@@ -277,18 +242,18 @@ In-process Foundry Local via `Microsoft.AI.Foundry.Local.WinML` 1.2.3 was tested
 
 **Consequences:** Adding a model to `appsettings.json` automatically includes it in integration tests; no test code changes needed. CI is now GREEN without GPU. GPU dev box retains full coverage.
 
-**Note (2026-06-16):** This decision's precondition-gate approach via `Skip.If/IfNot` was **reversed** by user directive in Decision #13 below.
+**Note (2026-06-16):** This decision's precondition-gate approach via `Skip.If/IfNot` was **reversed** by user directive in Decision #11 below.
 
 ---
 
-### 13. No-Skip Integration Tests — All Tests Either PASS or FAIL (Never Skip)
+### 11. No-Skip Integration Tests — All Tests Either PASS or FAIL (Never Skip)
 
 **Date:** 2026-06-16  
 **Author:** Switch (Tester)  
 **Status:** Implemented  
 **Requested by:** Jeffrey Palermo
 
-**Context:** Jeffrey Palermo directed "I don't want to skip tests under any conditions. I'd rather they fail if they can't pass." The preceding Decision #12's `Skip.If/IfNot` mechanism allowed tests to conditionally skip when preconditions (live Foundry service, GPU, opencode CLI, Playwright browser) were missing. This is reversed.
+**Context:** Jeffrey Palermo directed "I don't want to skip tests under any conditions. I'd rather they fail if they can't pass." The preceding Decision #10's `Skip.If/IfNot` mechanism allowed tests to conditionally skip when preconditions (live Foundry service, GPU, opencode CLI, Playwright browser) were missing. This is reversed.
 
 **Decision:**
 Remove every conditional-skip mechanism from `FoundryLocalLlmServer.IntegrationTests` and convert all guarded conditions to hard assertions:
@@ -312,14 +277,14 @@ Remove every conditional-skip mechanism from `FoundryLocalLlmServer.IntegrationT
 
 ---
 
-### 14. Integration Tests Retargeted to In-Process Server (Final Architecture)
+### 12. Integration Tests Retargeted to In-Process Server (Final Architecture)
 
 **Date:** 2026-06-16  
 **Author:** Apoc (DevOps / Infra)  
 **Status:** Implemented  
 **Requested by:** Jeffrey Palermo
 
-**Context:** Per Decision #13 (no skips), the integration test suite must PASS on the real GPU machine by reworking away from obsolete external architectures (foundry CLI, opencode CLI, phi-4-mini). The suite must target the in-process Foundry Local server (already running via ASP.NET Core on port 5537) and use the verified supported model set (qwen2.5-1.5b, qwen2.5-0.5b per Decision #9).
+**Context:** Per Decision #11 (no skips), the integration test suite must PASS on the real GPU machine by reworking away from obsolete external architectures (foundry CLI, opencode CLI, phi-4-mini). The suite must target the in-process Foundry Local server (already running via ASP.NET Core on port 5537) and use the verified supported model set (qwen2.5-1.5b, qwen2.5-0.5b per Decision #7).
 
 **Decision:**
 1. **HTTP-driven service discovery.** `FoundryServiceHelper` no longer shells out to `foundry` or `opencode` CLIs. It drives the in-process server over HTTP: readiness = `GET /api/foundry` (new); model load = `POST /api/models/select {"model":alias}` then poll `GET /api/models` / `GET /v1/models` until loaded.
@@ -340,7 +305,95 @@ Remove every conditional-skip mechanism from `FoundryLocalLlmServer.IntegrationT
 - Tests pass unconditionally on the real GPU machine
 - No external CLI dependencies (foundry, opencode) required in test harness
 - In-process server is the only test subject
-- Full suite 24/24 green; zero skips per Decision #13
+- Full suite 24/24 green; zero skips per Decision #11
+
+---
+
+### 13. Fix GPU VRAM leak by bounding request context server-side
+
+**Author:** Apoc (DevOps/Infra)  
+**Date:** 2026-06-16  
+**Requested by:** Jeffrey Palermo  
+**Status:** Implemented  
+**Area:** `FoundryLocalLlmServer.Server` (in-process Foundry Local, CUDA EP), integration tests
+
+## Bug
+
+Sending the repro prompt below ~10× in a row through the web UI drove the in-process Foundry server to consume all 8 GB of the RTX 4060 (8188 MiB) and slow to a crawl (175–190 s/request by iterations 8–10), even though the model itself needs < 3 GB. Switching models did **not** reclaim the memory — it looked like duplicate model copies were resident.
+
+Exact repro prompt (note the embedded quotes around the letter r):
+
+```
+write a 8000 line poem about cats. Make every 3rd couplet also rhyme. Do not use the letter "r" anywhere
+```
+
+## Root cause (confirmed with evidence)
+
+The embedded ONNX GenAI / WinML runtime sizes its CUDA KV-cache **arena** to each request's **INPUT prompt length** and never releases it for the life of the process (high-water-mark allocation). `IModel.UnloadAsync()` and `FoundryLocalManager.StopWebServiceAsync()` do **not** reclaim it — only process termination does.
+
+The React UI resends the entire, ever-growing conversation transcript on every turn with **no `max_tokens`**, so the per-request input grows unboundedly and the arena climbs until the card OOMs. The "duplicate model copies that survive a model switch" are these oversized retained arenas: `catalog.GetLoadedModelsAsync()` always reports exactly **one** loaded model, so the orphaned arenas are invisible to it and to the model-select unload loop.
+
+Evidence:
+
+- 10-iter faithful UI repro (accumulating history, no cap): VRAM climbed monotonically **2601 → 7867 MiB** while `loadedModels` stayed **1**; late iterations took 175–190 s.
+- Server logs: every request is `attempt=0`, returns 200, with **no** "Reloaded model … via SDK" line → the retry path never fires.
+- Model switch 1.5b → 0.5b only dropped 7851 → 5913 MiB (should be ~1755) → unload cannot free orphaned arenas.
+- Driver isolation: a flat short-context loop (no history, `max_tokens=512`, 12 iters) stayed flat at **~2361 MiB** (zero leak). Output is cheap (`max_tokens=4096` → only 2481 MiB). Input dominates: ~500 tok → 3249, ~2000 tok → 6331, ~5000 tok → saturates.
+- Only a full **process restart** returns VRAM to 24 MiB idle.
+
+### Preliminary analysis — verdict
+
+- **Suspect #1** (`EnsureModelLoadedAsync` → `LoadAsync` stacking copies on the chat retry path): **REFUTED.** The retry path never fires in the repro (logs show only `attempt=0`/200, no reload line).
+- **Suspect #2** (orphaned instances untracked by `GetLoadedModelsAsync`, so never reclaimed by the select endpoint): **CONFIRMED mechanism** — the runtime reports a single model while large arenas remain resident and unreclaimable.
+
+## Fix
+
+Bound every request server-side rather than relying on the runtime to reclaim memory:
+
+1. New options `FoundryLocalOptions.MaxPromptTokens` (default **1024**) and `MaxResponseTokens` (default **2048**).
+2. New pure helper `OpenAiChatHelpers.ApplyContextBounds(...)`: caps `max_tokens`, trims the oldest turns (preserving the system message and the latest user message), and head-truncates an oversized latest message to the prompt budget. Wired into `/v1/chat/completions`, replacing the old `max_tokens`-only cap.
+3. Made `EnsureModelLoadedAsync` **idempotent** — guard on `IModel.IsLoadedAsync()` and unload other loaded instances before any (re)load — so the retry path can never stack a second resident copy (defensive; Suspect #1 was refuted but this hardens it).
+
+Architecture preserved: in-process Foundry, CUDA EP (OpenVINO excluded), Foundry-only (503 on unreachable, no fallback). No endpoints changed; no protected selectors changed.
+
+## Before / after VRAM (per-iteration, 10 iterations)
+
+| Iter | Buggy (MiB) | Fixed (MiB) |
+|-----:|------------:|------------:|
+| 1    | 2601        | 2345        |
+| 2    | 2729        | 2473        |
+| 3    | 2985        | 2737        |
+| 4    | 3497        | 3249        |
+| 5    | 6577        | 3259        |
+| 6    | 7857        | 3259        |
+| 7    | 7857        | 3259        |
+| 8    | 7859        | 3259        |
+| 9    | 7851        | 3259        |
+| 10   | 7851        | 3259        |
+| **peak** | **7867** | **3259** |
+
+Buggy: up to 190 s/request near the end. Fixed: plateaus at ~3259 MiB (under the 5000 MiB ceiling, well below the 8188 MiB card total), ≤ 16 s/request.
+
+## Regression test
+
+`FoundryLocalLlmServer.IntegrationTests/RepeatedPromptVramTests.cs` — drives the real SPA with Playwright through the exact repro flow 10×, reads `nvidia-smi` (`--query-gpu=memory.used --format=csv,noheader,nounits`) after each iteration, and asserts: peak ≤ 5000 MiB, growth < 2500 MiB, and loaded model instances ≤ 1. It FAILS on the buggy server and PASSES on the fixed server. Runs unconditionally (no skips). Seven unit tests cover `ApplyContextBounds` in `OpenAiChatHelpersTests.cs`.
+
+## Verification
+
+- `dotnet build` → 0 errors / 0 warnings.
+- `dotnet test .\FoundryLocalLlmServer.sln`:
+  - Integration: **Total 25, Passed 25, Failed 0, Skipped 0** (was 24; +1 new VRAM test).
+  - Unit: **Total 8, Passed 8, Failed 0, Skipped 0** (+6 ApplyContextBounds tests).
+- After the fixture disposed: `nvidia-smi` back to **24 MiB** idle, no orphan processes.
+
+## Note / build gotcha
+
+`ServerFixture` and the launcher prefer the **`win-x64` RID** copy of the server EXE. Plain `dotnet build <csproj>` only updates the non-RID TFM folder (`bin/Debug/net10.0-windows10.0.18362.0/`); you must build with `-r win-x64` for changes to reach the copy that actually runs.
+
+## Follow-ups (optional, not blocking)
+
+- Consider surfacing `MaxPromptTokens`/`MaxResponseTokens` explicitly in `appsettings*.json` (currently code defaults apply).
+- The frontend could also cap the transcript it sends, but the server-side bound is the authoritative fix.
 
 ---
 

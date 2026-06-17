@@ -78,3 +78,7 @@
 Excluded: phi-4-mini (token-0 degenerate on 1.2.3), all 7B models (95% VRAM on 8 GB → OOM-risk), qwen2.5-coder-3b (not in catalog).
 
 The config-driven `AvailableModels` array now drives the `/api/models` list returned by GET and validated by POST. Any future model add/remove is a simple config edit with no code change required.
+
+### 2026-06-16 — Apoc VRAM leak fix + context-bounding
+
+Server now caps per-request context with FoundryLocalOptions.MaxPromptTokens (default 1024) and MaxResponseTokens (default 2048) via OpenAiChatHelpers.ApplyContextBounds in /v1/chat/completions. Fixed VRAM leak (peak 7867→3259 MiB, latency 175–190s→≤16s) caused by unbounded INPUT prompt arena. New RepeatedPromptVramTests (Playwright + nvidia-smi sampler) verifies peak ≤ 5000 MiB; all 25 integration tests passing.
