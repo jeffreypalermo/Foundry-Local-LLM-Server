@@ -87,15 +87,16 @@ jobs:
 
       - name: Mark PR as ready for review
         if: success()
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-          echo "Looking for PR from branch: $BRANCH_NAME"
-          PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
-          if [ -n "$PR_NUMBER" ]; then
-            echo "Found PR #$PR_NUMBER, marking as ready for review..."
-            gh pr ready "$PR_NUMBER" || echo "PR may already be ready or unable to mark ready"
-          else
-            echo "No open PR found for branch $BRANCH_NAME"
-          fi
+          $branch = "${{ github.ref }}" -replace '^refs/heads/', ''
+          Write-Host "Looking for PR from branch: $branch"
+          $prNumber = gh pr list --head $branch --state open --json number --jq '.[0].number' 2>$null
+          if ($prNumber) {
+            Write-Host "Found PR #$prNumber, marking as ready for review..."
+            gh pr ready $prNumber 2>$null || Write-Host "PR may already be ready or unable to mark ready"
+          } else {
+            Write-Host "No open PR found for branch $branch"
+          }
