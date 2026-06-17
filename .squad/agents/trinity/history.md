@@ -30,3 +30,8 @@
    - **Default model:** `qwen2.5-1.5b` (coherent + proper OpenAI `tool_calls`; ~2.5 GB VRAM)
    - **Fallback:** `qwen2.5-0.5b` (coherent, prose-only; ~1.8 GB VRAM)
   - The model dropdown now sources from `GET /api/models` and switches via `POST /api/models/select`. This authoritative set reflects Apoc's live verification and replaces the previous hardcoded default.
+
+- **2026-06-16T17:58:58.872-05:00 — Fixed 2 ESLint `@typescript-eslint/no-unused-vars` errors in tests:**
+  - `frontend/tests/e2e.spec.ts:125`: Removed unused `page` parameter from test callback `async ({ page }) => {}` → `async () => {}`. Test body only calls `fetch()` directly to the API; the Playwright `page` fixture was never used.
+  - `frontend/tests/exploratory.spec.ts:8`: Removed unused `baseUrl` variable declaration. Code constructs URLs manually as `http://localhost:${port}` in the loop and never referenced the constant.
+  - Both fixes applied surgical removal of genuinely dead code (no disable directives or underscore prefix). `npm run lint` now reports **0 problems**.

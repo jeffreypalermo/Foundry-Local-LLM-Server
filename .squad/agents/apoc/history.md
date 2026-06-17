@@ -70,4 +70,32 @@ Key finding: tool_calls ≠ size. Only qwen2.5-1.5b Instruct returns OpenAI-comp
 
 **Build gotcha:** `ServerFixture` prefers `win-x64` RID copy. Plain `dotnet build` only updates non-RID folder; must use `-r win-x64`.
 
+### 2026-06-16 — Full Foundry Local catalog sweep (Decision #14)
+
+Enumerated entire Foundry Local catalog via `/v1/models` endpoint (18 CUDA-GPU variants). Systematically tested 16 models on RTX 4060 8 GB.
+
+**Results:** **15/16 models SUPPORTED** — all produce coherent GPU output.
+
+| VRAM Tier | Models | Count |
+|-----------|--------|-------|
+| < 2000 MiB | qwen2.5-coder-0.5b, qwen2.5-0.5b, qwen3-0.6b | 3 |
+| 2000-3000 MiB | qwen3.5-0.8b, qwen2.5-1.5b, qwen3-1.7b, qwen2.5-coder-1.5b, qwen3.5-2b-text | 5 |
+| 3000-5000 MiB | phi-3-mini-4k, phi-3.5-mini, smollm3-3b, phi-3-mini-128k, qwen3-4b, qwen3.5-2b | 6 |
+| > 5000 MiB | qwen2.5-coder-7b (6329 MiB) | 1 |
+
+**Excluded:**
+- phi-4-mini: Degenerate token-0 output (`!!!`); 8-bit artifact incompatible with WinML 1.2.3
+- qwen3-vl-2b: Vision model, uncached
+
+**tool_calls capability (corrected):** Only 3 models emit proper OpenAI `tool_calls` arrays:
+- qwen2.5-0.5b ✅
+- qwen2.5-1.5b ✅
+- smollm3-3b ✅
+
+Other models (qwen3/phi/coder) return prose or XML-wrapped calls instead of structured `tool_calls`.
+
+**Config updated:** `AvailableModels` expanded to all 15; `qwen2.5-1.5b` remains default (best balance of coherence + tool_calls + moderate VRAM).
+
+**Tests:** 89/90 PASS (Unit 8/8, Integration 81/82). 1 Playwright UI timeout (pre-existing flaky test, not model-related).
+
 ---

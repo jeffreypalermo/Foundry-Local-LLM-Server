@@ -397,8 +397,46 @@ Buggy: up to 190 s/request near the end. Fixed: plateaus at ~3259 MiB (under the
 
 ---
 
+### 16. Full Foundry Local Catalog Sweep — RTX 4060 (Apoc)
+
+**Date:** 2026-06-16
+**Author:** Apoc (DevOps / Infra)
+**Status:** Complete — catalog verified, config updated, 15 models supported with proper tool_calls
+**Consequences:** 
+- Model set expanded to 15 CUDA-GPU variants (qwen2.5-coder-0.5b through qwen2.5-coder-7b).
+- qwen2.5-1.5b set as default (proven, tool_calls capability, moderate VRAM 2457 MiB).
+- Only 3 models emit proper OpenAI tool_calls: qwen2.5-0.5b, qwen2.5-1.5b, smollm3-3b.
+- phi-4-mini excluded (degenerate token-0 output; 8-bit MatMulNBits artifact incompatible with WinML 1.2.3).
+- SupportedModelData.cs updated with tool-calling flags and full supported set.
+- Safe VRAM operating ceiling: ~6.5 GB with bounded context; idle baseline ~24 MiB.
+
+**Full Verdict Table (from sweep):**
+
+| Alias | Full Variant | VRAM (MiB) | Coherent | tool_calls | Verdict |
+|-------|--------------|------------|----------|------------|---------|
+| qwen2.5-coder-0.5b | qwen2.5-coder-0.5b-instruct-cuda-gpu:4 | 1045 | ✅ | ❌ (XML) | **SUPPORTED** |
+| qwen2.5-0.5b | qwen2.5-0.5b-instruct-cuda-gpu:4 | 1163 | ✅ | ✅ | **SUPPORTED** |
+| qwen3-0.6b | qwen3-0.6b-cuda-gpu:2 | 1557 | ✅ | ❌ (prose) | **SUPPORTED** |
+| qwen3.5-0.8b | qwen3.5-0.8b-cuda-gpu:2 | 2217 | ✅ | ❌ (prose) | **SUPPORTED** |
+| qwen2.5-1.5b | qwen2.5-1.5b-instruct-cuda-gpu:4 | 2457 | ✅ | ✅ | **SUPPORTED** ← DEFAULT |
+| qwen3-1.7b | qwen3-1.7b-cuda-gpu:2 | 2457 | ✅ | ❌ (prose) | **SUPPORTED** |
+| qwen2.5-coder-1.5b | qwen2.5-coder-1.5b-instruct-cuda-gpu:4 | 2487 | ✅ | ❌ (XML) | **SUPPORTED** |
+| qwen3.5-2b-text | qwen3.5-2b-text-cuda-gpu:1 | 2783 | ✅ | ❌ (prose) | **SUPPORTED** |
+| phi-3-mini-4k | Phi-3-mini-4k-instruct-cuda-gpu:2 | 3759 | ✅ | ❌ (prose) | **SUPPORTED** |
+| phi-3.5-mini | Phi-3.5-mini-instruct-cuda-gpu:2 | 3759 | ✅ | ❌ (prose) | **SUPPORTED** |
+| smollm3-3b | smollm3-3b-cuda-gpu:1 | 3761 | ✅ | ✅ | **SUPPORTED** |
+| phi-3-mini-128k | Phi-3-mini-128k-instruct-cuda-gpu:2 | 3763 | ✅ | ❌ (prose) | **SUPPORTED** |
+| qwen3-4b | qwen3-4b-cuda-gpu:2 | 4503 | ✅ | ❌ (prose) | **SUPPORTED** |
+| qwen3.5-2b | qwen3.5-2b-cuda-gpu:2 | 4789 | ✅ | ❌ (prose) | **SUPPORTED** |
+| qwen2.5-coder-7b | qwen2.5-coder-7b-instruct-cuda-gpu:4 | 6329 | ✅ | ❌ (XML) | **SUPPORTED** |
+
+**Excluded:** phi-4-mini (token-0 degenerate), qwen3-vl-2b (uncached vision).
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
