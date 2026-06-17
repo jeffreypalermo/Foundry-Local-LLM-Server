@@ -9,63 +9,93 @@
 - **CI:** `dotnet test ./FoundryLocalLlmServer.sln` — integration tests use `UseStubResponses=true` (no GPU needed)
 - **User:** Jeffrey Palermo
 
-## Learnings
+## Key Learnings (Summary Timeline)
 
-### 2026-05-11 — opencode integration (phi-4 via Foundry Local proxy)
+### 2026-05-11/2026-05-12 — opencode integration + error handling
 
-- **opencode version:** 1.14.31 (already installed via Chocolatey)
-- **Config location:** `C:\Users\JeffreyPalermo\.config\opencode\opencode.json` (this is the active config opencode loads)
-- **Provider format:** opencode uses `@ai-sdk/openai-compatible` npm package for any OpenAI-compatible endpoint. Config key is `"provider"`, NOT `"providers"`. Each provider entry requires `npm`, `name`, `options.baseURL`, and `models`.
-- **`/v1/models` endpoint required:** opencode's `@ai-sdk/openai-compatible` SDK queries `GET /v1/models` to discover available model IDs. The server did not have this endpoint — added it to `Program.cs` returning `phi-4` in OpenAI list format.
-- **Config snippet that works:**
-  ```json
-  "foundry-local": {
-    "npm": "@ai-sdk/openai-compatible",
-    "name": "Foundry Local (phi-4)",
-    "options": { "baseURL": "http://localhost:5537/v1" },
-    "models": { "phi-4": { "name": "Phi-4 (local)", "tool_call": false, "temperature": true, "attachment": false, "reasoning": false } }
-  }
-  ```
-- **CLI invocation:** `opencode run --model foundry-local/phi-4 "prompt"` — model flag format is `<providerID>/<modelID>`
-- **Verified:** `service=llm providerID=foundry-local modelID=phi-4` appeared in opencode logs confirming the local server was used. No API key required.
-- **No CORS issues:** Server is not called from browser by opencode; opencode CLI calls it directly, so no CORS headers needed.
-- **Foundry Local GPU service:** Must be running on port 5273 for real inference. Without it, proxy returns 503. `UseStubResponses=true` env var bypasses this for testing.
+- opencode 1.14.31 via Chocolatey; config at `C:\Users\JeffreyPalermo\.config\opencode\opencode.json`.
+- Added `/v1/models` endpoint for model discovery.
+- Wrapped proxy in try/catch, return **503 ProblemDetails** when Foundry Local unreachable.
+- Live test: Playwright passed, real phi-4-mini CUDA reply in ~1.78s.
 
-### 2026-05-11 — Live testing session (Foundry Local offline)
+### 2026-06-03 — phi-4-mini regression diagnosis (Decision #4)
 
-- **Foundry Local status:** NOT running. Port 5273 actively refused connections.
-- **Bug found:** `Program.cs` `/v1/chat/completions` proxy had no error handling around `proxyClient.SendAsync`. When Foundry Local is down, `HttpRequestException` bubbled up and the ASP.NET `UseExceptionHandler()` middleware returned a generic 500 ProblemDetails. Frontend showed "Completion failed (500)" — not user-friendly.
-- **Fix applied (commit 396b3ee):**
-  1. `Program.cs`: wrapped `proxyClient.SendAsync` in try/catch for `HttpRequestException`, now returns `Results.Problem(statusCode: 503)` with a clear message indicating Foundry Local is unreachable.
-  2. `frontend/src/App.tsx`: on non-OK fetch responses, now attempts to parse ProblemDetails JSON and surface the `detail` or `title` field as the UI error message.
-- **Verified behavior:** UI shows "Could not reach Foundry Local at http://127.0.0.1:5273. Ensure the service is running." — actionable for developers.
-- **Build quirk:** `dotnet build` with `Select-String` pipe hangs. Use `-v minimal` without pipes; the build output is parseable inline. Also the `AssemblyInfoInputs.cache` file sometimes gets locked — delete it to unblock a rebuild.
-- **All tests pass:** unit tests, frontend lint, frontend production build all green.
+- Layer 1: `foundry model list` fails on empty `promptTemplate` field (GitHub #752/#757). Workaround: seed `~/.foundry/cache/models/foundry.modelinfo.json`.
+- Layer 2: phi-4-mini produces constant token-0 (degenerate) on 0.8.119. Runtime/artifact version gap; no upgrade path.
+- Decision: Track real fix once v1.2.0+ installable.
 
-### 2026-05-12 — Resumed live testing (validation session)
+### 2026-06-16 — End-to-end GPU success (three bugs fixed)
 
-- **Test environment:** Ran server binary directly with `FoundryLocalLlmServer.Server.exe` (no Aspire orchestrator, faster iteration).
-- **Test 1 (Config endpoint):** `GET /api/foundry` returns 200 with correct endpoint and model.
-- **Test 2 (Model discovery):** `GET /v1/models` returns 200 with OpenAI-compatible list format, phi-4 model present.
-- **Test 3 (Stub response):** `POST /v1/chat/completions` with `UseStubResponses=true` returns 200 with valid OpenAI-compatible response including choices[0].message.content.
-- **Test 4 (Error handling):** `POST /v1/chat/completions` with `UseStubResponses=false` and Foundry Local unreachable:
-  - Returns **HTTP 503** (correct status for upstream dependency failure)
-  - Content-Type: `application/problem+json` (ProblemDetails per RFC 7807)
-  - JSON body includes `title: "Foundry Local Unavailable"` and `detail: "Could not reach Foundry Local at http://127.0.0.1:5273. Ensure the service is running."`
-  - Detail field includes exception message with exact endpoint and reason (connection refused)
-- **Frontend integration:** App.tsx correctly parses ProblemDetails and displays `detail` field to user.
-- **Verdict:** ✅ All critical paths working. Error handling is actionable and semantically correct. No defects found.
+1. **SelectGpuVariant GPU-agnostic** → picked OpenVINO instead of NVIDIA. Made selection EP-aware (prefer CUDA, else any NVIDIA).
+2. **Config drift:** appsettings incorrectly said `NvTensorRtRtx`. Restored `CUDA` everywhere.
+3. **Aspire stale sockets** in `~/.aspire/cli/backchannels/` (PID reuse). Deleted orphans; clean restart.
 
-### 2026-05-12 — Live Playwright E2E test (real LLM, Send Prompt button)
+Result: qwen2.5-0.5b CUDA inference on RTX 4060 peak **1305–1561 MiB**, util **77–82%**. phi-4-mini still token-0; qwen coherent.
 
-- **Full solution build:** ✅ All 4 projects (`Server`, `AppHost`, `UnitTests`, `IntegrationTests`) succeeded with `dotnet build ./FoundryLocalLlmServer.sln -v minimal`. Note: `--no-build` should be used for `dotnet test` when already built to skip the second restore cycle.
-- **Frontend build:** ✅ `npm run build` in `frontend/` produced `dist/` in 119ms (Vite 8.0.7, TypeScript compiled).
-- **Foundry Local status:** ✅ Running. `foundry service status` confirmed `🟢 Model management service is running on http://127.0.0.1:53874/openai/status`. Note: port is dynamic (53874 this session, was 5273 in earlier sessions) — `FoundryServiceHelper` correctly discovers it via `foundry service start` regex pattern.
-- **GPU model loaded:** ✅ `Phi-4-mini-instruct-cuda-gpu:5` confirmed via `GET /v1/models`. The `ModelIdMatchesAlias("Phi-4-mini-instruct-cuda-gpu:5", "phi-4-mini")` → true because `instruct` is a BackendToken.
-- **Playwright test result:** ✅ **PASSED** — `AppHost_SendPrompt_ReturnsAssistantResponse` — 1 test, 0 failed, 0 skipped, duration 63.2s.
-  - Server started on port 5537 in ~57 seconds (Playwright browser install + server spinup).
-  - Model alias resolved: `phi-4-mini` → `Phi-4-mini-instruct-cuda-gpu:5` (context cap=131072).
-  - Chat completion proxied to Foundry Local, 200 response received in 1.78 seconds.
-  - Real LLM response verified non-empty by assertion.
-- **Run command:** `dotnet test ./FoundryLocalLlmServer.IntegrationTests/FoundryLocalLlmServer.IntegrationTests.csproj --filter "FullyQualifiedName~PlaywrightIntegrationTests" -v normal --no-build`
-- **Key infra note:** Running `dotnet test` against the `.sln` with many projects triggers a NuGet restore that can appear hung (shows only timing ticks). Run against the specific project with `--no-build` after a solution-level `dotnet build` for reliable CI iteration.
+### 2026-06-16 — Supported-model sweep (Decision #7)
+
+Tested qwen2.5-1.5b, qwen2.5-0.5b, phi-4-mini, qwen2.5-coder-7b, qwen2.5-7b on RTX 4060.
+
+**Confirmed working:** qwen2.5-1.5b (coherent + tool_calls + 2.5 GB) **[default]**, qwen2.5-0.5b (coherent + no tool_calls + 1.8 GB).
+**Excluded:** phi-4-mini (token-0), coder-7b (95% VRAM), 7b (95% VRAM), coder-3b (not in catalog).
+
+Key finding: tool_calls ≠ size. Only qwen2.5-1.5b Instruct returns OpenAI-compatible `tool_calls`.
+
+### 2026-06-16 — Integration test rework: in-process HTTP-driven (Decision #12)
+
+- Removed all `foundry`/`opencode` CLI usage from tests.
+- **FoundryServiceHelper:** HTTP-driven discovery (`GET /api/foundry`, `POST /api/models/select`).
+- **ServerFixture:** Starts Server EXE once on :5537 with stubs OFF, publishes frontend, waits for ready, kills on dispose. Prefers `win-x64` RID copy.
+- **Per-test model switching** via `/api/models/select`; reuses cached models (no large re-downloads).
+- **All tests pass or fail** (zero skips per Decision #11). Structural stub tests + per-model GPU theory tests.
+- Bug hunt: typo in hand-written curl JSON body (missing `}`), not a server bug. Program.cs business logic unchanged. Two test-side fixes: tool_calls awareness for 0.5b, guard for empty choices[] in SSE.
+
+**Final result:** Build 0 errors, **24/24 tests PASS**, zero skips, VRAM back to 24 MiB idle.
+
+### 2026-06-16 — VRAM leak diagnosis & fix (Decision #13)
+
+**Root cause:** CUDA KV-cache arena sized to INPUT prompt length, never released (high-water-mark). UI resends full transcript with no max_tokens → unbounded input → OOM.
+
+**Evidence:** 10-iter repro: VRAM climbed **2601→7867 MiB**, loadedModels stayed 1, late iterations 175–190s. Model switch only dropped 7851→5913 (no reclaim). Isolated short-context flat at ~2361 MiB. Input dominates arena size: ~500 tok→3249, ~2000 tok→6331, ~5000 tok→saturates.
+
+**Fix:** Server-side context bounding.
+- New `FoundryLocalOptions.MaxPromptTokens` (1024), `MaxResponseTokens` (2048).
+- New `OpenAiChatHelpers.ApplyContextBounds(...)`: caps max_tokens, trims old turns, head-truncates oversized messages.
+- Hardened `EnsureModelLoadedAsync` idempotent (IsLoadedAsync guard, unload-others-before-reload).
+- New `RepeatedPromptVramTests` (Playwright + nvidia-smi sampler): peak ≤ 5000 MiB, growth < 2500 MiB.
+
+**Before/after:** peak 7867→3259 MiB, latency 175–190s→≤16s.
+
+**Final result:** `dotnet build` 0/0, Unit 8/8 PASS, Integration 25/25 PASS (+1 new VRAM test, +6 ApplyContextBounds tests), VRAM 24 MiB idle.
+
+**Build gotcha:** `ServerFixture` prefers `win-x64` RID copy. Plain `dotnet build` only updates non-RID folder; must use `-r win-x64`.
+
+### 2026-06-16 — Full Foundry Local catalog sweep (Decision #14)
+
+Enumerated entire Foundry Local catalog via `/v1/models` endpoint (18 CUDA-GPU variants). Systematically tested 16 models on RTX 4060 8 GB.
+
+**Results:** **15/16 models SUPPORTED** — all produce coherent GPU output.
+
+| VRAM Tier | Models | Count |
+|-----------|--------|-------|
+| < 2000 MiB | qwen2.5-coder-0.5b, qwen2.5-0.5b, qwen3-0.6b | 3 |
+| 2000-3000 MiB | qwen3.5-0.8b, qwen2.5-1.5b, qwen3-1.7b, qwen2.5-coder-1.5b, qwen3.5-2b-text | 5 |
+| 3000-5000 MiB | phi-3-mini-4k, phi-3.5-mini, smollm3-3b, phi-3-mini-128k, qwen3-4b, qwen3.5-2b | 6 |
+| > 5000 MiB | qwen2.5-coder-7b (6329 MiB) | 1 |
+
+**Excluded:**
+- phi-4-mini: Degenerate token-0 output (`!!!`); 8-bit artifact incompatible with WinML 1.2.3
+- qwen3-vl-2b: Vision model, uncached
+
+**tool_calls capability (corrected):** Only 3 models emit proper OpenAI `tool_calls` arrays:
+- qwen2.5-0.5b ✅
+- qwen2.5-1.5b ✅
+- smollm3-3b ✅
+
+Other models (qwen3/phi/coder) return prose or XML-wrapped calls instead of structured `tool_calls`.
+
+**Config updated:** `AvailableModels` expanded to all 15; `qwen2.5-1.5b` remains default (best balance of coherence + tool_calls + moderate VRAM).
+
+**Tests:** 89/90 PASS (Unit 8/8, Integration 81/82). 1 Playwright UI timeout (pre-existing flaky test, not model-related).
+
+---

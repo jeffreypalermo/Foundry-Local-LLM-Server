@@ -1,3 +1,57 @@
 {
-  "version": 1
+  "version": 1,
+  "models": {
+    "opus48": {
+      "provider": "anthropic",
+      "model": "claude-opus-4.8",
+      "description": "Highest-reasoning model for architectural, implementation, and test-critical work"
+    },
+    "gemma4_ollama": {
+      "provider": "ollama",
+      "model": "gemma4",
+      "description": "Local gemma4 via Ollama for lightweight planning/triage tasks"
+    }
+  },
+  "member_preferences": {
+    "neo": {
+      "preferred": "opus48",
+      "rationale": "Lead architectural calls and high-impact trade-offs need strongest reasoning",
+      "note": "Default to opus48 for lead decisions and cross-cutting review work"
+    },
+    "trinity": {
+      "preferred": "opus48",
+      "rationale": "Frontend implementation and API-contract reasoning benefit from stronger synthesis",
+      "note": "Use opus48 for feature implementation and refactors with contract implications"
+    },
+    "tank": {
+      "preferred": "opus48",
+      "rationale": "Backend/API contract and integration logic require high-confidence reasoning",
+      "note": "Use opus48 for server changes, protocol handling, and cross-cutting backend decisions"
+    },
+    "switch": {
+      "preferred": "opus48",
+      "rationale": "Test design and edge-case analysis require deep reasoning over system behavior",
+      "note": "Use opus48 for test strategy, coverage decisions, and failure analysis"
+    },
+    "apoc": {
+      "preferred": "gemma4_ollama",
+      "rationale": "Routine pipeline and infra maintenance is mostly procedural and latency-sensitive",
+      "note": "Use local gemma4 for CI/status and infra chores; escalate only when needed"
+    },
+    "scribe": {
+      "preferred": "gemma4_ollama",
+      "rationale": "Session logging and documentation are lightweight synthesis tasks",
+      "note": "Use local gemma4 for history/decision capture and summarization"
+    },
+    "ralph": {
+      "preferred": "gemma4_ollama",
+      "rationale": "Monitoring, aggregation, and work tracking are lightweight classification tasks",
+      "note": "Use local gemma4 for watch, alert, and status-rollup duties"
+    },
+    "coordinator": {
+      "preferred": "gemma4_ollama",
+      "rationale": "Coordinator routing and orchestration are lightweight planning and dispatch tasks",
+      "note": "Use local gemma4 for coordination unless explicitly overridden by user request"
+    }
+  }
 }

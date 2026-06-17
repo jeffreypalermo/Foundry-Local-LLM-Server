@@ -35,9 +35,9 @@
 
 ## Model
 
-- **Preferred:** auto
-- **Rationale:** Test code = standard tier; test analysis = fast
-- **Fallback:** Standard chain
+- **Preferred:** opus48 (`claude-opus-4.8`)
+- **Rationale:** Test strategy and edge-case analysis need deep reasoning over system behavior.
+- **Fallback:** `gemma4_ollama` for lightweight triage only
 
 ## Collaboration
 

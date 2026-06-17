@@ -291,6 +291,8 @@ internal static class FoundryServiceHelper
         }
     }
 
+
+
     /// <summary>
     /// Ensures a model's GPU variant is downloaded and loaded in Foundry Local.
     /// Downloads if needed, then loads. Returns true if the model is ready for use.
@@ -327,7 +329,6 @@ internal static class FoundryServiceHelper
         return true;
     }
 
-
     /// <summary>
     /// Device/backend token words that appear immediately after the alias in Foundry model IDs.
     /// For example "phi-4-cuda-gpu:4" — "cuda" terminates the alias "phi-4".
@@ -360,6 +361,30 @@ internal static class FoundryServiceHelper
     /// </summary>
     internal static bool ModelIdMatchesAlias(string modelId, string alias)
     {
+        if (ModelIdMatchesAliasCore(modelId, alias))
+            return true;
+
+        // Accept aliases both with and without a dash between the family name and version:
+        // "gemma4" <-> "gemma-4", "phi4" <-> "phi-4".
+        var dashedAlias = Regex.Replace(alias, "(?<=[A-Za-z])(?=\\d)", "-");
+        if (!string.Equals(dashedAlias, alias, StringComparison.OrdinalIgnoreCase)
+            && ModelIdMatchesAliasCore(modelId, dashedAlias))
+        {
+            return true;
+        }
+
+        var compactAlias = alias.Replace("-", string.Empty, StringComparison.Ordinal);
+        if (!string.Equals(compactAlias, alias, StringComparison.OrdinalIgnoreCase)
+            && ModelIdMatchesAliasCore(modelId, compactAlias))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ModelIdMatchesAliasCore(string modelId, string alias)
+    {
         if (string.Equals(modelId, alias, StringComparison.OrdinalIgnoreCase)) return true;
         if (modelId.StartsWith(alias + ":", StringComparison.OrdinalIgnoreCase)) return true;
         if (!modelId.StartsWith(alias + "-", StringComparison.OrdinalIgnoreCase)) return false;
@@ -371,38 +396,38 @@ internal static class FoundryServiceHelper
             || afterAlias.StartsWith(t + ":"));
     }
 
-    private static async Task<string?> DiscoverUrlAsync()
-    {
-        try
-        {
-            var psi = new ProcessStartInfo("foundry")
-            {
-                Arguments = "service start",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
+   private static async Task<string?> DiscoverUrlAsync()
+   {
+       try
+       {
+           var psi = new ProcessStartInfo("foundry")
+           {
+               Arguments = "service start",
+               UseShellExecute = false,
+               RedirectStandardOutput = true,
+               RedirectStandardError = true,
+           };
 
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start foundry process.");
+           using var process = Process.Start(psi)
+               ?? throw new InvalidOperationException("Failed to start foundry process.");
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
+           var stdoutTask = process.StandardOutput.ReadToEndAsync();
+           var stderrTask = process.StandardError.ReadToEndAsync();
 
-            await process.WaitForExitAsync(cts.Token);
+           await process.WaitForExitAsync(cts.Token);
 
-            var combined = (await stdoutTask) + (await stderrTask);
-            var match = ServiceUrlPattern.Match(combined);
-            if (!match.Success)
-                return null;
+           var combined = (await stdoutTask) + (await stderrTask);
+           var match = ServiceUrlPattern.Match(combined);
+           if (!match.Success)
+               return null;
 
-            return match.Groups[1].Value.TrimEnd('/');
-        }
-        catch
-        {
-            return null;
-        }
-    }
+           return match.Groups[1].Value.TrimEnd('/');
+       }
+       catch
+       {
+           return null;
+       }
+   }
 }

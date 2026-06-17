@@ -41,8 +41,11 @@ public class AspireGenerationIntegrationTests
         _ = gpuFileSize; // used in test name display only
 
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
-        Assert.True(foundryUrl != null && await FoundryServiceHelper.IsRunningAsync(),
+        Assert.NotNull(foundryUrl);
+        Assert.True(await FoundryServiceHelper.IsRunningAsync(),
             "Foundry Local is not running. Start it with 'foundry service start'.");
+        Assert.True(await IsCommandAvailableAsync("opencode"),
+            "opencode CLI is not installed or not available on PATH.");
 
         _output.WriteLine($"Ensuring GPU model ready: {modelAlias}");
         var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync(modelAlias, _output);
@@ -202,4 +205,31 @@ public class AspireGenerationIntegrationTests
 
     private static string StripAnsiCodes(string input) =>
         AnsiEscapePattern.Replace(input, string.Empty);
+
+    private static async Task<bool> IsCommandAvailableAsync(string command)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(command)
+            {
+                Arguments = "--version",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null)
+                return false;
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(cts.Token);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

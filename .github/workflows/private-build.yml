@@ -1,0 +1,72 @@
+name: Private Build
+run-name: "1.0.${{ github.run_number }} • Private Build • ${{ github.head_ref || github.ref_name }}"
+on:
+  push:
+  workflow_dispatch:
+env:
+  MAJOR_VERSION: 1
+  MINOR_VERSION: 0
+
+jobs:
+  private-build:
+    name: Private Build (Unit Tests)
+    runs-on: windows-latest
+    concurrency:
+      group: private-build-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Set Version
+        shell: pwsh
+        run: |
+          $version = "${{ env.MAJOR_VERSION }}.${{ env.MINOR_VERSION }}.${{ github.run_number }}"
+          "BUILD_BUILDNUMBER=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Build version: $version"
+
+      - name: Restore
+        run: dotnet restore FoundryLocalLlmServer.sln
+
+      - name: Build
+        run: dotnet build FoundryLocalLlmServer.sln --no-restore --configuration Release
+
+      - name: Run Unit Tests
+        run: >
+          dotnet test FoundryLocalLlmServer.UnitTests/FoundryLocalLlmServer.UnitTests.csproj
+          --no-build --configuration Release
+          --logger "trx;LogFileName=unit-tests.trx"
+          --results-directory build/test
+
+      - name: Test Reporter
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Unit Test Results
+          path: 'build/test/**/*.trx'
+          reporter: dotnet-trx
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-unit
+          path: build/test/**/*.trx
+          retention-days: 2

@@ -13,8 +13,8 @@ Persistent memory agent that maintains context across sessions.
 - Maintain code quality and project standards
 - Document decisions and progress in history
 
-## Work Style
+## Model
 
-- Read project context and team decisions before starting work
-- Communicate clearly with team members
-- Follow established patterns and conventions
+- **Preferred:** gemma4_ollama (`ollama/gemma4`)
+- **Rationale:** Monitoring and status aggregation are lightweight classification/summarization tasks.
+- **Fallback:** opus48 (`claude-opus-4.8`) only for complex cross-stream analysis

@@ -1,0 +1,89 @@
+name: Integration Build
+run-name: "1.0.${{ github.run_number }} • Integration Build • ${{ github.head_ref || github.ref_name }}"
+on:
+  push:
+  workflow_dispatch:
+env:
+  MAJOR_VERSION: 1
+  MINOR_VERSION: 0
+
+jobs:
+  integration-build:
+    name: Integration Build
+    runs-on: windows-latest
+    concurrency:
+      group: integration-build-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Set Version
+        shell: pwsh
+        run: |
+          $version = "${{ env.MAJOR_VERSION }}.${{ env.MINOR_VERSION }}.${{ github.run_number }}"
+          "BUILD_BUILDNUMBER=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Build version: $version"
+
+      - name: Restore
+        run: dotnet restore FoundryLocalLlmServer.sln
+
+      - name: Build (all projects including integration tests)
+        run: dotnet build FoundryLocalLlmServer.sln --no-restore --configuration Release
+
+      - name: Run Unit Tests
+        run: >
+          dotnet test FoundryLocalLlmServer.UnitTests/FoundryLocalLlmServer.UnitTests.csproj
+          --no-build --configuration Release
+          --logger "trx;LogFileName=unit-tests.trx"
+          --results-directory build/test
+
+      - name: Test Reporter
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Integration Build Test Results
+          path: 'build/test/**/*.trx'
+          reporter: dotnet-trx
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-integration
+          path: build/test/**/*.trx
+          retention-days: 2
+
+      - name: Mark PR as ready for review
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $branch = "${{ github.ref }}" -replace '^refs/heads/', ''
+          Write-Host "Looking for PR from branch: $branch"
+          $prNumber = gh pr list --head $branch --state open --json number --jq '.[0].number' 2>$null
+          if ($prNumber) {
+            Write-Host "Found PR #$prNumber, marking as ready for review..."
+            gh pr ready $prNumber 2>$null
+          } else {
+            Write-Host "No open PR found for branch $branch"
+          }
