@@ -84,11 +84,17 @@ jobs:
           if (-not $ready) { throw "Server did not become ready on http://localhost:5537 within 30s" }
           Write-Host "Server is ready."
 
+      # Only run tests that are safe in CI (no GPU, no real Foundry runtime):
+      #   OpenAiCompatibilityTests  — uses ServerFactory (WebApplicationFactory + stub mode)
+      #   FoundryServiceHelperAliasTests — pure logic tests, no server required
+      # Category!=GPU-Required is intentionally NOT used here: when a test has multiple
+      # Category traits (e.g. Category=Integration AND Category=GPU-Required) xunit will
+      # include it because Category=Integration satisfies the != condition.
       - name: Run Integration Tests (stub mode, non-GPU)
         run: >
           dotnet test FoundryLocalLlmServer.IntegrationTests/FoundryLocalLlmServer.IntegrationTests.csproj
           --no-build --configuration Release
-          --filter "Category!=GPU-Required"
+          --filter "FullyQualifiedName~OpenAiCompatibilityTests|FullyQualifiedName~FoundryServiceHelperAliasTests"
           --logger "trx;LogFileName=integration-tests.trx"
           --results-directory build/test
 
