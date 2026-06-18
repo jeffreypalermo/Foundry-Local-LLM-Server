@@ -4,6 +4,8 @@ using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using FoundryLocalLlmServer.Server;
+using Microsoft.AI.Foundry.Local;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,52 +24,82 @@ var _endpointLock = new SemaphoreSlim(1, 1);
 // Serialize requests to Foundry — concurrent streaming requests crash the service
 var _foundryRequestGate = new SemaphoreSlim(1, 1);
 
+// Cache of alias → (resolvedId, maxTotalTokens) — declared early so EnsureModelLoadedAsync can clear it.
+var aliasCache = new ConcurrentDictionary<string, (string ResolvedId, int MaxTokens)>(StringComparer.OrdinalIgnoreCase);
+
+// The actual variant ID loaded (e.g. "qwen2.5-0.5b-instruct-generic-cpu:4").
+// Set by EnsureModelLoadedAsync after SelectVariant+Load so routing prefers the loaded variant.
+string? _loadedVariantId = null;
+
 async Task<string?> DiscoverFoundryEndpointAsync()
 {
     try
     {
-        using var proc = Process.Start(new ProcessStartInfo("foundry")
+        if (!FoundryLocalManager.IsInitialized)
         {
-            Arguments = "service start",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-        if (proc != null)
-        {
-            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
-            var stderrTask = proc.StandardError.ReadToEndAsync();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await proc.WaitForExitAsync(cts.Token);
-            var combined = await stdoutTask + await stderrTask;
-            var match = Regex.Match(combined, @"(?:running|started)\s+on\s+(http://[^\s/]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-                return match.Groups[1].Value.TrimEnd('/');
+            var modelCacheDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".foundry", "cache", "models");
+            await FoundryLocalManager.CreateAsync(
+                new Configuration
+                {
+                    AppName = "foundry",
+                    ModelCacheDir = modelCacheDir,
+                    Web = new Configuration.WebService { Urls = "http://127.0.0.1:0" },
+                },
+                NullLogger.Instance);
         }
+        if (FoundryLocalManager.Instance.Urls is not { Length: > 0 })
+            await FoundryLocalManager.Instance.StartWebServiceAsync();
+        return FoundryLocalManager.Instance.Urls?.FirstOrDefault();
     }
-    catch { /* Foundry CLI not available */ }
+    catch { /* Foundry Local SDK not available */ }
     return null;
 }
 
 async Task EnsureModelLoadedAsync(string modelAlias, ILogger logger)
 {
+    if (!FoundryLocalManager.IsInitialized) return;
     try
     {
-        logger.LogInformation("Loading model {Model} on Foundry...", modelAlias);
-        using var proc = Process.Start(new ProcessStartInfo("foundry")
+        logger.LogInformation("Loading model {Model} on Foundry via SDK...", modelAlias);
+        var catalog = await FoundryLocalManager.Instance.GetCatalogAsync();
+        var model = await catalog.GetModelAsync(modelAlias);
+        if (model == null)
         {
-            Arguments = $"model load {modelAlias} --device GPU --ttl 7200",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-        if (proc != null)
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            await proc.WaitForExitAsync(cts.Token);
-            var output = await proc.StandardOutput.ReadToEndAsync();
-            logger.LogInformation("Model load result: {Output}", output.Trim());
+            logger.LogWarning("Model {Model} not found in Foundry catalog", modelAlias);
+            return;
         }
+
+        // Prefer a cached CPU variant when the default selection would require
+        // an unavailable GPU execution provider (CUDA/GPU EP not registered).
+        var availableEps = FoundryLocalManager.Instance.DiscoverEps();
+        var hasCudaEp = availableEps.Any(ep =>
+            ep.IsRegistered &&
+            ep.Name.Contains("CUDA", StringComparison.OrdinalIgnoreCase));
+
+        if (!hasCudaEp && model.Variants is { } variants)
+        {
+            // Find a CPU/generic variant that is already cached on disk.
+            foreach (var v in variants)
+            {
+                var isCpu = v.Id?.Contains("cpu", StringComparison.OrdinalIgnoreCase) == true
+                         || v.Id?.Contains("generic", StringComparison.OrdinalIgnoreCase) == true;
+                if (isCpu && await v.IsCachedAsync())
+                {
+                    logger.LogInformation(
+                        "CUDA EP not available; switching to CPU variant {VariantId}", v.Id);
+                    model.SelectVariant(v);
+                    break;
+                }
+            }
+        }
+
+        await model.LoadAsync();
+        _loadedVariantId = model.Id;
+        aliasCache.Clear(); // flush stale GPU alias so next request re-resolves to loaded variant
+        logger.LogInformation("Model {Model} (variant {VariantId}) loaded successfully",
+            modelAlias, model.Id);
     }
     catch (Exception ex) { logger.LogWarning(ex, "Model load failed for {Model}", modelAlias); }
 }
@@ -131,20 +163,9 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
-{
-    var value = options.Value;
-    return Results.Ok(new
-    {
-        value.Endpoint,
-        value.Model,
-    });
-});
-
-// Cache of alias → (resolvedId, maxTotalTokens) — cleared when /v1/models is refreshed.
-// maxTotalTokens = maxInputTokens + maxOutputTokens as reported by Foundry.
-// Foundry enforces this as the hard limit for the max_tokens parameter.
-var aliasCache = new ConcurrentDictionary<string, (string ResolvedId, int MaxTokens)>(StringComparer.OrdinalIgnoreCase);
+// Mutable active-model state (protected by _activeModelLock).
+string _activeModel = string.Empty;
+var _activeModelLock = new SemaphoreSlim(1, 1);
 
 // Cached models list with expiry — avoids hammering Foundry on every request
 FoundryModel[] cachedModels = [];
@@ -157,6 +178,16 @@ const int DefaultMaxTokensFallback = 4096;
 // Token words that immediately follow the alias in Foundry model IDs (e.g. "phi-4-cuda-gpu:4")
 // "mini", "reasoning", etc. are NOT here because they extend the alias, not terminate it.
 string[] backendTokens = ["cuda", "openvino", "generic", "trtrtx", "npu", "gpu", "cpu", "instruct"];
+
+app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
+{
+    var value = options.Value;
+    return Results.Ok(new
+    {
+        value.Endpoint,
+        value.Model,
+    });
+});
 
 bool IsGpuVariant(string modelId)
 {
@@ -265,10 +296,17 @@ async Task<(string ResolvedId, int MaxTokens)> ResolveModelAsync(string requeste
         return entry;
     }
 
-    // Find matching models and prefer GPU variants over NPU
+    // Find matching models. If we loaded a specific variant (e.g. CPU because CUDA is unavailable),
+    // prefer it; otherwise fall back to GPU preference.
+    // Foundry /v1/models returns IDs without the version suffix (e.g. "qwen2.5-0.5b-instruct-generic-cpu"),
+    // while the SDK model.Id includes it (e.g. ":4"); strip the suffix before comparing.
     var matches = foundryModels.Where(m => ModelIdMatchesAlias(m.Id, requestedModel)).ToArray();
+    var lvBase = _loadedVariantId?.Split(':')[0]; // strip ":4" version suffix
+    var loadedVariantMatch = lvBase != null
+        ? matches.FirstOrDefault(m => string.Equals(m.Id, lvBase, StringComparison.OrdinalIgnoreCase))
+        : null;
     var gpuMatch = matches.FirstOrDefault(m => IsGpuVariant(m.Id));
-    var match = gpuMatch ?? matches.FirstOrDefault();
+    var match = loadedVariantMatch ?? gpuMatch ?? matches.FirstOrDefault();
     var result = match != null
         ? (match.Id, match.MaxTotalTokens)
         : (requestedModel, 0); // fall back; 0 means no capping
@@ -276,6 +314,78 @@ async Task<(string ResolvedId, int MaxTokens)> ResolveModelAsync(string requeste
     aliasCache[requestedModel] = result;
     return result;
 }
+
+string GetActiveModel(FoundryLocalOptions opts)
+{
+    var active = _activeModel;
+    return string.IsNullOrWhiteSpace(active) ? opts.Model : active;
+}
+
+app.MapGet("/api/models", async (IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory) =>
+{
+    var opts = options.Value;
+    var available = opts.AvailableModels.Length > 0 ? opts.AvailableModels : [opts.Model];
+    var active = GetActiveModel(opts);
+
+    if (opts.UseStubResponses)
+    {
+        var stubData = available.Select(id => new
+        {
+            id,
+            active = string.Equals(id, active, StringComparison.OrdinalIgnoreCase),
+            loaded = false,
+            device = "stub",
+        }).ToArray();
+        return Results.Ok(new { @object = "list", active, data = stubData });
+    }
+
+    var endpoint = await GetFoundryEndpointAsync(opts.Endpoint);
+    var loadedModels = await GetFoundryModelsAsync(endpoint, httpClientFactory);
+
+    var gpuData = available.Select(id =>
+    {
+        var isActive = string.Equals(id, active, StringComparison.OrdinalIgnoreCase);
+        var isLoaded = loadedModels.Any(m => ModelIdMatchesAlias(m.Id, id));
+        return new { id, active = isActive, loaded = isLoaded, device = isLoaded ? (string?)"GPU" : null };
+    }).ToArray();
+
+    return Results.Ok(new { @object = "list", active, data = gpuData });
+});
+
+app.MapPost("/api/models/select", async (HttpContext context, IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+{
+    var opts = options.Value;
+    var body = await JsonNode.ParseAsync(context.Request.Body);
+    var model = body?["model"]?.GetValue<string>();
+
+    if (string.IsNullOrWhiteSpace(model))
+        return Results.Problem(title: "Bad Request", detail: "model field is required.", statusCode: 400);
+
+    var available = opts.AvailableModels.Length > 0 ? opts.AvailableModels : [opts.Model];
+    if (!available.Any(m => string.Equals(m, model, StringComparison.OrdinalIgnoreCase)))
+        return Results.Problem(title: "Unknown Model", detail: $"'{model}' is not in the configured AvailableModels.", statusCode: 400);
+
+    if (opts.UseStubResponses)
+    {
+        await _activeModelLock.WaitAsync();
+        try { _activeModel = model; }
+        finally { _activeModelLock.Release(); }
+        return Results.Ok(new { active = model, device = "stub", loaded = false });
+    }
+
+    logger.LogInformation("Selecting model on GPU: {Model}", model);
+    await EnsureModelLoadedAsync(model, logger);
+
+    var currentEndpoint = await GetFoundryEndpointAsync(opts.Endpoint);
+    var foundryModels = await GetFoundryModelsAsync(currentEndpoint, httpClientFactory);
+    var isLoaded = foundryModels.Any(m => ModelIdMatchesAlias(m.Id, model));
+
+    await _activeModelLock.WaitAsync();
+    try { _activeModel = model; }
+    finally { _activeModelLock.Release(); }
+
+    return Results.Ok(new { active = model, device = "GPU", loaded = isLoaded });
+});
 
 app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory) =>
 {
