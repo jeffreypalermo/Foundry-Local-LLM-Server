@@ -1,0 +1,14 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+C:\Program Files\dotnet\sdk\10.0.300-preview.0.26177.108\Sdks\Microsoft.NET.Sdk\targets\Microsoft.NET.RuntimeIdentifierInference.targets(383,5): message NETSDK1057: You are using a preview version of .NET. See: https://aka.ms/dotnet-support-policy [D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.UnitTests\FoundryLocalLlmServer.UnitTests.csproj]
+C:\Program Files\dotnet\sdk\10.0.300-preview.0.26177.108\Sdks\Microsoft.NET.Sdk\targets\Microsoft.NET.RuntimeIdentifierInference.targets(383,5): message NETSDK1057: You are using a preview version of .NET. See: https://aka.ms/dotnet-support-policy [D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server\FoundryLocalLlmServer.Server.csproj]
+C:\Program Files\dotnet\sdk\10.0.300-preview.0.26177.108\Sdks\Microsoft.NET.Sdk\targets\Microsoft.NET.RuntimeIdentifierInference.targets(383,5): message NETSDK1057: You are using a preview version of .NET. See: https://aka.ms/dotnet-support-policy [D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\FoundryLocalLlmServer.IntegrationTests.csproj]
+  FoundryLocalLlmServer.Server -> D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server\bin\Debug\net10.0\FoundryLocalLlmServer.Server.dll
+  FoundryLocalLlmServer.UnitTests -> D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.UnitTests\bin\Debug\net10.0\FoundryLocalLlmServer.UnitTests.dll
+Test run for D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.UnitTests\bin\Debug\net10.0\FoundryLocalLlmServer.UnitTests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:     2, Skipped:     0, Total:     2, Duration: 17 ms - FoundryLocalLlmServer.UnitTests.dll (net10.0)
+  FoundryLocalLlmServer.IntegrationTests -> D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Debug\net10.0\FoundryLocalLlmServer.IntegrationTests.dll
+Test run for D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Debug\net10.0\FoundryLocalLlmServer.IntegrationTests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.

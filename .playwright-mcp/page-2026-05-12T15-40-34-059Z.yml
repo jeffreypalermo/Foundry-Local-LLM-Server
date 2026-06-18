@@ -1,0 +1,21 @@
+- main [ref=e3]:
+  - heading "Foundry Local OpenAI Server" [level=1] [ref=e4]
+  - paragraph [ref=e5]:
+    - text: "Model:"
+    - strong [ref=e6]: qwen3-0.6b
+  - paragraph [ref=e7]:
+    - text: "Foundry endpoint:"
+    - code [ref=e8]: http://127.0.0.1:53969
+  - paragraph [ref=e9]:
+    - text: "OpenAI-compatible endpoint for tools:"
+    - code [ref=e10]: /v1/chat/completions
+  - generic [ref=e11]:
+    - textbox "Enter a prompt" [ref=e12]
+    - button "Send Prompt" [ref=e13] [cursor=pointer]
+  - region "Chat transcript" [ref=e14]:
+    - article [ref=e15]:
+      - heading "User" [level=2] [ref=e16]
+      - paragraph [ref=e17]: Explain why local OpenAI-compatible endpoints are useful.
+    - article [ref=e18]:
+      - heading "Assistant" [level=2] [ref=e19]
+      - paragraph [ref=e20]: Okay, the user is asking why local OpenAI-compatible endpoints are useful. Let me start by breaking down what OpenAI-compatible endpoints mean. First, I need to mention that these endpoints are optimized for performance and reliability. That's important because users might be concerned about latency or connection stability. Next, I should highlight that these endpoints are designed to be more accessible and user-friendly. This means that users can easily access these endpoints without needing technical expertise. Additionally, I need to mention that these endpoints are optimized for performance and reliability. This ensures that users can access these endpoints without any issues. I should also consider the implications for users and businesses. By making these endpoints accessible and user-friendly, users can easily access these endpoints, which can be used for various tasks. I should also mention that these endpoints are designed to be more accessible and user-friendly. This means that users can easily access these endpoints without needing technical expertise. I think that's covering the main points. Now, I need

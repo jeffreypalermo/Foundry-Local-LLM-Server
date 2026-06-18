@@ -1,0 +1,292 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="0f36eb9d-e984-4e8c-a703-340b433e36dd" name="JeffreyPalermo@DESKTOP-OBS4PVU 2026-06-17 21:53:10" runUser="AzureAD\JeffreyPalermo" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-06-17T21:53:10.6765623-05:00" queuing="2026-06-17T21:53:10.6765624-05:00" start="2026-06-17T21:53:06.8477631-05:00" finish="2026-06-17T21:54:53.7030388-05:00" />
+  <TestSettings name="default" id="aedb4fdc-2989-40ba-b548-77fddab83a80">
+    <Deployment runDeploymentRoot="JeffreyPalermo_DESKTOP-OBS4PVU_2026-06-17_21_53_10" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="b14006af-d605-456d-aed8-cd53e6ebaf44" testId="2da737bd-01c9-9624-bf3b-777c88a48e4c" testName="FoundryLocalLlmServer.IntegrationTests.OpenAiCompatibilityTests.OpenAiRoute_ReturnsCompletionPayload" computerName="DESKTOP-OBS4PVU" duration="00:00:00.0037271" startTime="2026-06-17T21:54:53.4359127-05:00" endTime="2026-06-17T21:54:53.4398882-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b14006af-d605-456d-aed8-cd53e6ebaf44" />
+    <UnitTestResult executionId="2eb9c33c-a9d3-4ac3-839d-7c3ab6990297" testId="70ac03fe-6b4f-5bcd-ec67-a75bc7c89024" testName="FoundryLocalLlmServer.IntegrationTests.OpenAiCompatibilityTests.MicrosoftExtensionsAIChatClient_CanCallOpenAiFormatEndpoint" computerName="DESKTOP-OBS4PVU" duration="00:00:02.1787145" startTime="2026-06-17T21:54:51.2562231-05:00" endTime="2026-06-17T21:54:53.4353009-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2eb9c33c-a9d3-4ac3-839d-7c3ab6990297" />
+    <UnitTestResult executionId="5d62a64c-c858-4cd9-9a5c-39ac27dcae3b" testId="9fec2123-9c7b-7559-2a2f-8d8152fd49a6" testName="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_NonStreaming_ReturnsOpenAiCompletion" computerName="DESKTOP-OBS4PVU" duration="00:01:34.5124460" startTime="2026-06-17T21:53:12.1757507-05:00" endTime="2026-06-17T21:54:46.6885914-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5d62a64c-c858-4cd9-9a5c-39ac27dcae3b">
+      <Output>
+        <StdOut>Foundry service discovery: found at http://127.0.0.1:54701&#xD;
+GPU variant of 'phi-4-mini' is already loaded.&#xD;
+Model 'phi-4-mini' is ready via Foundry Local&#xD;
+Phi (Foundry Local, model=Phi-4-mini-instruct-cuda-gpu:5) responded: Hello! 2+2 equals 4.</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="2273f4cd-2a8e-4153-8119-c2cf9c9d36a9" testId="a34ea0c3-c4f7-4efa-ece9-e873681bf95d" testName="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_Response_MatchesOpenAiSchema" computerName="DESKTOP-OBS4PVU" duration="00:00:02.2869224" startTime="2026-06-17T21:54:48.9661528-05:00" endTime="2026-06-17T21:54:51.2534669-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2273f4cd-2a8e-4153-8119-c2cf9c9d36a9">
+      <Output>
+        <StdOut>Foundry service discovery: found at http://127.0.0.1:54701&#xD;
+GPU variant of 'phi-4-mini' is already loaded.&#xD;
+Model 'phi-4-mini' is ready via Foundry Local&#xD;
+OpenAI schema validated for Foundry Local Phi GPU response: {"model":"Phi-4-mini-instruct-cuda-gpu:5","choices":[{"delta":{"role":"assistant","content":"Hello! How can I help you today?","tool_calls":[]},"message":{"role":"assistant","content":"Hello! How can I help you today?","tool_calls":[]},"index":0,"finish_reason":"stop"}],"created":1781751291,"CreatedAt":"2026-06-18T02:54:51\u002B00:00","id":"chat.id.3","IsDelta":false,"Successful":true,"HttpStatusCode":0,"object":"chat.completion"}</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="d6987777-f495-484b-b66b-ef4c44c3b4f4" testId="48f0ecd0-2b05-e914-69f6-d913ea58d665" testName="FoundryLocalLlmServer.IntegrationTests.FoundryServiceHelperAliasTests.ModelIdMatchesAlias_AcceptsDashedAliasForCompactModelFamily" computerName="DESKTOP-OBS4PVU" duration="00:00:00.0000483" startTime="2026-06-17T21:54:53.4526241-05:00" endTime="2026-06-17T21:54:53.4526979-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d6987777-f495-484b-b66b-ef4c44c3b4f4" />
+    <UnitTestResult executionId="5e21b4ec-3aed-4c7d-b1fa-0adaeadeb965" testId="6fe48143-0cee-9110-7358-d665fb4ca46a" testName="FoundryLocalLlmServer.IntegrationTests.PlaywrightIntegrationTests.AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu" computerName="DESKTOP-OBS4PVU" duration="00:00:01.9320814" startTime="2026-06-17T21:53:07.8067385-05:00" endTime="2026-06-17T21:53:09.7516571-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5e21b4ec-3aed-4c7d-b1fa-0adaeadeb965">
+      <Output>
+        <StdOut>Ensuring GPU model ready: gemma-4&#xD;
+Downloading GPU variant of 'gemma-4'...&#xD;
+Failed to download GPU variant of 'gemma-4'.</StdOut>
+        <ErrorInfo>
+          <Message>Could not load GPU variant of gemma-4.</Message>
+          <StackTrace>   at FoundryLocalLlmServer.IntegrationTests.PlaywrightIntegrationTests.AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu() in D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\PlaywrightIntegrationTests.cs:line 37&#xD;
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b5cd26e2-6fd7-4038-8425-4b3422a42b4b" testId="46eabf48-68a2-4d88-80a2-9bfd6dd45371" testName="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_ModelNotAvailable_ErrorsWithoutOllamaFallback" computerName="DESKTOP-OBS4PVU" duration="00:00:02.4085828" startTime="2026-06-17T21:53:09.7647181-05:00" endTime="2026-06-17T21:53:12.1739165-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b5cd26e2-6fd7-4038-8425-4b3422a42b4b">
+      <Output>
+        <StdOut>Foundry service discovery: found at http://127.0.0.1:54701&#xD;
+GPU variant of 'phi-4-mini' is already loaded.&#xD;
+Model 'phi-4-mini' is ready via Foundry Local&#xD;
+Unavailable model correctly errored (503) without Ollama fallback.</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1e769a4e-4635-48c9-b0b1-b012c0a64240" testId="107d90e5-f363-7398-ebf8-393b7e105135" testName="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_Streaming_ReturnsSseChunks" computerName="DESKTOP-OBS4PVU" duration="00:00:02.2757578" startTime="2026-06-17T21:54:46.6893706-05:00" endTime="2026-06-17T21:54:48.9654246-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1e769a4e-4635-48c9-b0b1-b012c0a64240">
+      <Output>
+        <StdOut>Foundry service discovery: found at http://127.0.0.1:54701&#xD;
+GPU variant of 'phi-4-mini' is already loaded.&#xD;
+Model 'phi-4-mini' is ready via Foundry Local&#xD;
+Streamed 2878 bytes of SSE from Foundry Local.&#xD;
+Assembled streamed content: 1, 2, 3.</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="bef99d22-a8b2-4d74-97b0-4a8809a47378" testId="d0bbbb44-2224-6695-a307-1d33656c20aa" testName="FoundryLocalLlmServer.IntegrationTests.FoundryServiceHelperAliasTests.ModelIdMatchesAlias_AcceptsCompactAliasForDashedModelFamily" computerName="DESKTOP-OBS4PVU" duration="00:00:00.0004521" startTime="2026-06-17T21:54:53.4517943-05:00" endTime="2026-06-17T21:54:53.4524034-05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bef99d22-a8b2-4d74-97b0-4a8809a47378" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_Streaming_ReturnsSseChunks" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="107d90e5-f363-7398-ebf8-393b7e105135">
+      <Execution id="1e769a4e-4635-48c9-b0b1-b012c0a64240" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests" name="PhiOnFoundryGpu_Streaming_ReturnsSseChunks" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.FoundryServiceHelperAliasTests.ModelIdMatchesAlias_AcceptsDashedAliasForCompactModelFamily" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="48f0ecd0-2b05-e914-69f6-d913ea58d665">
+      <Execution id="d6987777-f495-484b-b66b-ef4c44c3b4f4" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.FoundryServiceHelperAliasTests" name="ModelIdMatchesAlias_AcceptsDashedAliasForCompactModelFamily" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.FoundryServiceHelperAliasTests.ModelIdMatchesAlias_AcceptsCompactAliasForDashedModelFamily" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="d0bbbb44-2224-6695-a307-1d33656c20aa">
+      <Execution id="bef99d22-a8b2-4d74-97b0-4a8809a47378" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.FoundryServiceHelperAliasTests" name="ModelIdMatchesAlias_AcceptsCompactAliasForDashedModelFamily" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.PlaywrightIntegrationTests.AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="6fe48143-0cee-9110-7358-d665fb4ca46a">
+      <Execution id="5e21b4ec-3aed-4c7d-b1fa-0adaeadeb965" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.PlaywrightIntegrationTests" name="AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.OpenAiCompatibilityTests.OpenAiRoute_ReturnsCompletionPayload" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="2da737bd-01c9-9624-bf3b-777c88a48e4c">
+      <Execution id="b14006af-d605-456d-aed8-cd53e6ebaf44" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.OpenAiCompatibilityTests" name="OpenAiRoute_ReturnsCompletionPayload" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_Response_MatchesOpenAiSchema" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="a34ea0c3-c4f7-4efa-ece9-e873681bf95d">
+      <Execution id="2273f4cd-2a8e-4153-8119-c2cf9c9d36a9" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests" name="PhiOnFoundryGpu_Response_MatchesOpenAiSchema" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.OpenAiCompatibilityTests.MicrosoftExtensionsAIChatClient_CanCallOpenAiFormatEndpoint" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="70ac03fe-6b4f-5bcd-ec67-a75bc7c89024">
+      <Execution id="2eb9c33c-a9d3-4ac3-839d-7c3ab6990297" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.OpenAiCompatibilityTests" name="MicrosoftExtensionsAIChatClient_CanCallOpenAiFormatEndpoint" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_NonStreaming_ReturnsOpenAiCompletion" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="9fec2123-9c7b-7559-2a2f-8d8152fd49a6">
+      <Execution id="5d62a64c-c858-4cd9-9a5c-39ac27dcae3b" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests" name="PhiOnFoundryGpu_NonStreaming_ReturnsOpenAiCompletion" />
+    </UnitTest>
+    <UnitTest name="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests.PhiOnFoundryGpu_ModelNotAvailable_ErrorsWithoutOllamaFallback" storage="d:\foundry-local-llm-server\foundrylocalllmserver.integrationtests\bin\release\net10.0\foundrylocalllmserver.integrationtests.dll" id="46eabf48-68a2-4d88-80a2-9bfd6dd45371">
+      <Execution id="b5cd26e2-6fd7-4038-8425-4b3422a42b4b" />
+      <TestMethod codeBase="D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\bin\Release\net10.0\FoundryLocalLlmServer.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FoundryLocalLlmServer.IntegrationTests.PhiFoundryGpuIntegrationTests" name="PhiOnFoundryGpu_ModelNotAvailable_ErrorsWithoutOllamaFallback" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="2da737bd-01c9-9624-bf3b-777c88a48e4c" executionId="b14006af-d605-456d-aed8-cd53e6ebaf44" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="70ac03fe-6b4f-5bcd-ec67-a75bc7c89024" executionId="2eb9c33c-a9d3-4ac3-839d-7c3ab6990297" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9fec2123-9c7b-7559-2a2f-8d8152fd49a6" executionId="5d62a64c-c858-4cd9-9a5c-39ac27dcae3b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a34ea0c3-c4f7-4efa-ece9-e873681bf95d" executionId="2273f4cd-2a8e-4153-8119-c2cf9c9d36a9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="48f0ecd0-2b05-e914-69f6-d913ea58d665" executionId="d6987777-f495-484b-b66b-ef4c44c3b4f4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6fe48143-0cee-9110-7358-d665fb4ca46a" executionId="5e21b4ec-3aed-4c7d-b1fa-0adaeadeb965" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="46eabf48-68a2-4d88-80a2-9bfd6dd45371" executionId="b5cd26e2-6fd7-4038-8425-4b3422a42b4b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="107d90e5-f363-7398-ebf8-393b7e105135" executionId="1e769a4e-4635-48c9-b0b1-b012c0a64240" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d0bbbb44-2224-6695-a307-1d33656c20aa" executionId="bef99d22-a8b2-4d74-97b0-4a8809a47378" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="9" executed="9" passed="8" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)&#xD;
+[xUnit.net 00:00:00.06]   Discovering: FoundryLocalLlmServer.IntegrationTests&#xD;
+[xUnit.net 00:00:00.09]   Discovered:  FoundryLocalLlmServer.IntegrationTests&#xD;
+[xUnit.net 00:00:00.10]   Starting:    FoundryLocalLlmServer.IntegrationTests&#xD;
+[xUnit.net 00:00:02.07]       Could not load GPU variant of gemma-4.&#xD;
+[xUnit.net 00:00:02.07]       Stack Trace:&#xD;
+[xUnit.net 00:00:02.07]         D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.IntegrationTests\PlaywrightIntegrationTests.cs(37,0): at FoundryLocalLlmServer.IntegrationTests.PlaywrightIntegrationTests.AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu()&#xD;
+[xUnit.net 00:00:02.07]         --- End of stack trace from previous location ---&#xD;
+[xUnit.net 00:00:02.07]       Output:&#xD;
+[xUnit.net 00:00:02.07]         Ensuring GPU model ready: gemma-4&#xD;
+[xUnit.net 00:00:02.07]         Downloading GPU variant of 'gemma-4'...&#xD;
+[xUnit.net 00:00:02.07]         Failed to download GPU variant of 'gemma-4'.&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application started. Press Ctrl+C to shut down.&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Hosting environment: Development&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Content root path: D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server&#xD;
+info: Program[0]&#xD;
+      Resolving model alias: this-model-does-not-exist-anywhere-xyz → endpoint http://127.0.0.1:54701&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 14.6741ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 30.3772ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 53.3784ms - 200&#xD;
+info: Program[0]&#xD;
+      Resolved model: this-model-does-not-exist-anywhere-xyz (cap=0)&#xD;
+info: Program[0]&#xD;
+      Proxying to http://127.0.0.1:54701/v1/chat/completions (stream=False, attempt=0)&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 6.5477ms - 400&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '400', Handled: 'False', Attempt: '0', Execution Time: 6.6466ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 6.7409ms - 400&#xD;
+warn: Program[0]&#xD;
+      Foundry returned error BadRequest, will try Ollama fallback&#xD;
+warn: Program[0]&#xD;
+      Foundry Local unavailable after all attempts&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application is shutting down...&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application started. Press Ctrl+C to shut down.&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Hosting environment: Development&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Content root path: D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server&#xD;
+info: Program[0]&#xD;
+      Resolving model alias: phi-4-mini → endpoint http://127.0.0.1:54701&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 8.9915ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 9.7022ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 9.8243ms - 200&#xD;
+info: Program[0]&#xD;
+      Resolved model: Phi-4-mini-instruct-cuda-gpu:5 (cap=131072)&#xD;
+info: Program[0]&#xD;
+      Proxying to http://127.0.0.1:54701/v1/chat/completions (stream=False, attempt=0)&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 92338.1771ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 92338.3476ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 92338.4681ms - 200&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application is shutting down...&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application started. Press Ctrl+C to shut down.&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Hosting environment: Development&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Content root path: D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server&#xD;
+info: Program[0]&#xD;
+      Resolving model alias: phi-4-mini → endpoint http://127.0.0.1:54701&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 9.1684ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 9.3349ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 9.4135ms - 200&#xD;
+info: Program[0]&#xD;
+      Resolved model: Phi-4-mini-instruct-cuda-gpu:5 (cap=131072)&#xD;
+info: Program[0]&#xD;
+      Proxying to http://127.0.0.1:54701/v1/chat/completions (stream=True, attempt=0)&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 40.2892ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 40.3943ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 40.4725ms - 200&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application is shutting down...&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application started. Press Ctrl+C to shut down.&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Hosting environment: Development&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Content root path: D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server&#xD;
+info: Program[0]&#xD;
+      Resolving model alias: phi-4-mini → endpoint http://127.0.0.1:54701&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request GET http://127.0.0.1:54701/v1/models&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 9.6065ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 9.8066ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 9.898ms - 200&#xD;
+info: Program[0]&#xD;
+      Resolved model: Phi-4-mini-instruct-cuda-gpu:5 (cap=131072)&#xD;
+info: Program[0]&#xD;
+      Proxying to http://127.0.0.1:54701/v1/chat/completions (stream=False, attempt=0)&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]&#xD;
+      Start processing HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]&#xD;
+      Sending HTTP request POST http://127.0.0.1:54701/v1/chat/completions&#xD;
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]&#xD;
+      Received HTTP response headers after 136.3942ms - 200&#xD;
+info: Polly[3]&#xD;
+      Execution attempt. Source: '-standard//Standard-Retry', Operation Key: '', Result: '200', Handled: 'False', Attempt: '0', Execution Time: 136.4872ms&#xD;
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]&#xD;
+      End processing HTTP request after 136.5683ms - 200&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application is shutting down...&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application started. Press Ctrl+C to shut down.&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Hosting environment: Development&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Content root path: D:\Foundry-Local-LLM-Server\FoundryLocalLlmServer.Server&#xD;
+info: Microsoft.Hosting.Lifetime[0]&#xD;
+      Application is shutting down...&#xD;
+[xUnit.net 00:01:45.77]   Finished:    FoundryLocalLlmServer.IntegrationTests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="DESKTOP-OBS4PVU" outcome="Error" timestamp="2026-06-17T21:53:09.7533413-05:00">
+        <Text>[xUnit.net 00:00:02.07]     FoundryLocalLlmServer.IntegrationTests.PlaywrightIntegrationTests.AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+    <CollectorDataEntries>
+      <Collector agentName="DESKTOP-OBS4PVU" uri="datacollector://microsoft/CoverletCodeCoverage/1.0" collectorDisplayName="XPlat code coverage">
+        <UriAttachments>
+          <UriAttachment>
+            <A href="DESKTOP-OBS4PVU\coverage.cobertura.xml"></A>
+          </UriAttachment>
+        </UriAttachments>
+      </Collector>
+    </CollectorDataEntries>
+  </ResultSummary>
+</TestRun>

@@ -59,7 +59,7 @@ jobs:
         run: |
           Write-Host "Running CI Build"
           . ./build.ps1
-          Build
+          Build -SkipGpu
 
       - name: Test Reporter
         uses: dorny/test-reporter@v2.1.1

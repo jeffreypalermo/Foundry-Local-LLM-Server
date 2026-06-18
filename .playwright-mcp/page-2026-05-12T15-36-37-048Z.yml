@@ -1,0 +1,15 @@
+- main [ref=e3]:
+  - heading "Foundry Local OpenAI Server" [level=1] [ref=e4]
+  - paragraph [ref=e5]:
+    - text: "Model:"
+    - strong [ref=e6]: phi-4
+  - paragraph [ref=e7]:
+    - text: "Foundry endpoint:"
+    - code [ref=e8]: http://127.0.0.1:53969
+  - paragraph [ref=e9]:
+    - text: "OpenAI-compatible endpoint for tools:"
+    - code [ref=e10]: /v1/chat/completions
+  - generic [ref=e11]:
+    - textbox "Enter a prompt" [ref=e12]: Explain why local OpenAI-compatible endpoints are useful.
+    - button "Send Prompt" [ref=e13] [cursor=pointer]
+  - region "Chat transcript"
