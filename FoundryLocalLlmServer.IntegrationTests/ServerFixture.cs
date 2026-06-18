@@ -35,14 +35,16 @@ public sealed class ServerFixture : IAsyncLifetime
             Timeout = TimeSpan.FromMinutes(5),
         };
 
-        EnsureFrontendPublishedToWwwroot();
-
-        // Reuse an already-running proxy server (e.g. a dev instance) instead of failing to bind :5537.
+        // Reuse an already-running proxy server (e.g. a dev instance or CI stub server)
+        // instead of failing to bind :5537. Skip the frontend build in this case — the
+        // externally-started server already has its own wwwroot (or doesn't need one for API tests).
         if (await IsProxyServerRunningAsync())
         {
             _startedByUs = false;
             return;
         }
+
+        EnsureFrontendPublishedToWwwroot();
 
         var exePath = GetServerExePath();
         var serverProjectDir = GetServerProjectDir();
