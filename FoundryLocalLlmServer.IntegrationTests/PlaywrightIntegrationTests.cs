@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Playwright;
 using Xunit.Abstractions;
-using Xunit;
 
 namespace FoundryLocalLlmServer.IntegrationTests;
 
@@ -20,22 +19,21 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
         _output = output;
     }
 
-    [SkippableFact]
+    [Fact]
     [Trait("Category", "Integration")]
     [Trait("Category", "GPU-Required")]
     public async Task AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu()
     {
         const string modelAlias = "gemma-4";
 
-        // Ensure Foundry Local is running and has at least one GPU model
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
-        Skip.If(foundryUrl == null, "Foundry Local is not running — skipping GPU test.");
-        Skip.If(!await FoundryServiceHelper.IsRunningAsync(),
-            "Foundry Local is not running. Start it with 'foundry service start'.");
+        Assert.NotNull(foundryUrl);
+        Assert.True(await FoundryServiceHelper.IsRunningAsync(),
+            "Foundry Local is not running. Run 'privatebuild.ps1 --check' to verify prerequisites.");
 
-        _output.WriteLine($"Ensuring GPU model ready: {modelAlias}");
-        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync(modelAlias, _output);
-        Skip.If(!modelReady, $"GPU variant of '{modelAlias}' could not be loaded — skipping.");
+        _output.WriteLine($"Verifying GPU model ready: {modelAlias}");
+        Assert.True(await FoundryServiceHelper.IsGpuModelAvailableAsync(modelAlias),
+            $"GPU variant of '{modelAlias}' is not loaded. Run 'privatebuild.ps1 --check' to verify prerequisites.");
 
         // Verify wwwroot exists (frontend must be pre-built)
         var serverProjectDir = Path.GetFullPath(
