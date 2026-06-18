@@ -1,1 +1,0 @@
-[    6826ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://localhost:5537/v1/chat/completions:0
