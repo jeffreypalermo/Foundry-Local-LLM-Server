@@ -24,6 +24,7 @@ public class PlaywrightIntegrationTests
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Category", "GPU-Required")]
     public async Task AppHost_SendPrompt_ReturnsAssistantResponse()
     {
         await _server.EnsureModelAsync(ModelAlias, _output);
