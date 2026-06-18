@@ -3,6 +3,30 @@
 **/TestResults/
 frontend/node_modules/
 frontend/dist/
+
+# IDE
+.vs/
+.bob/
+
+# Build output
+build/
+
+# Frontend build output embedded in server
+FoundryLocalLlmServer.Server/wwwroot/
+
+# Test and CI artefacts
+*.trx
+test-output.log
+test_output.log
+integration-test-output.txt
+frontend/test-results/
+
+# Playwright MCP session files
+.playwright-mcp/
+
+# Diagrams (generated)
+architecture-c4.png
+architecture-c4.puml
 # Squad: ignore runtime state (logs, inbox, sessions)
 .squad/orchestration-log/
 .squad/log/

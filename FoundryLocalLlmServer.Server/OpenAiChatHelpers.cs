@@ -162,6 +162,36 @@ public static class OpenAiChatHelpers
         return new ContextBounds(dropped, systemTokens + used, effectiveMax);
     }
 
+    public static string CreateStubStreamingResponse(string model, string prompt)
+    {
+        var responseText = string.IsNullOrWhiteSpace(prompt)
+            ? "Foundry Local test mode is active. Please provide a prompt."
+            : $"[stub:{model}] {prompt}";
+
+        var chunk = new JsonObject
+        {
+            ["id"] = $"chatcmpl-{Guid.NewGuid():N}",
+            ["object"] = "chat.completion.chunk",
+            ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            ["model"] = model,
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = new JsonObject
+                    {
+                        ["role"] = "assistant",
+                        ["content"] = responseText,
+                    },
+                    ["finish_reason"] = "stop",
+                },
+            },
+        };
+
+        return chunk.ToJsonString();
+    }
+
     public static JsonObject CreateStubResponse(string model, string prompt)
     {
         var completionId = $"chatcmpl-{Guid.NewGuid():N}";

@@ -1,5 +1,5 @@
-name: Build
-run-name: "1.0.${{ github.run_number }} • Build • ${{ github.event.pull_request.title != '' && github.event.pull_request.title || github.head_ref || github.ref_name }}"
+name: Integration Build
+run-name: "1.0.${{ github.run_number }} • Integration Build • ${{ github.head_ref || github.ref_name }}"
 on:
   push:
   workflow_dispatch:
@@ -12,20 +12,16 @@ jobs:
     name: Integration Build
     runs-on: windows-latest
     concurrency:
-      # Integration Build will be cancelled when new commits arrive on the branch.
-      # To protect the master branch, use ${{ github.ref != 'refs/heads/master' }} for cancel-in-progress:
-      group: build-${{ github.ref }}
+      group: integration-build-${{ github.ref }}
       cancel-in-progress: true
     permissions:
       contents: read
       checks: write
       pull-requests: write
-    env:
-      BUILD_CONFIGURATION: Release
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -45,24 +41,18 @@ jobs:
         run: |
           $version = "${{ env.MAJOR_VERSION }}.${{ env.MINOR_VERSION }}.${{ github.run_number }}"
           "BUILD_BUILDNUMBER=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          $version | Out-File -FilePath build_version.txt
           Write-Host "Build version: $version"
-          Write-Host "github.ref=${{ github.ref }}"
 
-      - name: Run CI Build
+      - name: Run CI Build (skip GPU-required tests)
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          BUILD_BUILDNUMBER: ${{ env.VERSION }}
+          BUILD_BUILDNUMBER: ${{ env.BUILD_BUILDNUMBER }}
         run: |
-          Write-Host "Running CI Build"
           . ./build.ps1
           Build -SkipGpu
 
       - name: Test Reporter
-        uses: dorny/test-reporter@v2.1.1
+        uses: dorny/test-reporter@v1
         if: always()
         with:
           name: Integration Build Test Results
@@ -73,16 +63,8 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results
+          name: test-results-integration
           path: build/test/**/*.trx
-          retention-days: 2
-
-      - name: Upload build_version.txt artifact
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: build-version
-          path: build_version.txt
           retention-days: 2
 
       - name: Mark PR as ready for review
@@ -96,7 +78,7 @@ jobs:
           $prNumber = gh pr list --head $branch --state open --json number --jq '.[0].number' 2>$null
           if ($prNumber) {
             Write-Host "Found PR #$prNumber, marking as ready for review..."
-            gh pr ready $prNumber 2>$null || Write-Host "PR may already be ready or unable to mark ready"
+            gh pr ready $prNumber 2>$null
           } else {
             Write-Host "No open PR found for branch $branch"
           }
