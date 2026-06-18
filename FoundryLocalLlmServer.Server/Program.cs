@@ -324,8 +324,19 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     {
         var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
         var model = requestPayload?["model"]?.GetValue<string>() ?? foundryOptions.Model;
-        var stubResponse = OpenAiChatHelpers.CreateStubResponse(model, prompt);
+        var isStreamingStub = requestPayload?["stream"]?.GetValue<bool>() == true;
 
+        if (isStreamingStub)
+        {
+            var stubChunk = OpenAiChatHelpers.CreateStubStreamingResponse(model, prompt);
+            context.Response.ContentType = "text/event-stream";
+            context.Response.Headers.CacheControl = "no-cache";
+            await context.Response.WriteAsync($"data: {stubChunk}\n\n", cancellationToken);
+            await context.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+            return Results.Empty;
+        }
+
+        var stubResponse = OpenAiChatHelpers.CreateStubResponse(model, prompt);
         return Results.Json(stubResponse);
     }
 
