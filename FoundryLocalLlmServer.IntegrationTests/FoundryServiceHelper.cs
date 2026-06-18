@@ -1,5 +1,6 @@
-using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Microsoft.AI.Foundry.Local;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit.Abstractions;
 
 namespace FoundryLocalLlmServer.IntegrationTests;
@@ -12,8 +13,8 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// </summary>
 internal static class FoundryServiceHelper
 {
-    private static readonly Regex ServiceUrlPattern =
-        new(@"running on (http://[^\s/]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    /// <summary>Base URL of the integration-test proxy server (not Foundry Local itself).</summary>
+    public const string ServerBaseUrl = "http://localhost:5537";
 
     private static string? _cachedUrl;
     private static readonly SemaphoreSlim _lock = new(1, 1);
@@ -206,31 +207,14 @@ internal static class FoundryServiceHelper
 
         try
         {
-            var psi = new ProcessStartInfo("foundry")
-            {
-                Arguments = $"model download {modelAlias} --device GPU",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start foundry download process.");
+            await EnsureSdkInitializedAsync();
+            var catalog = await FoundryLocalManager.Instance.GetCatalogAsync();
+            var model = await catalog.GetModelAsync(modelAlias);
+            if (model == null) return false;
 
             using var cts = new CancellationTokenSource(timeout.Value);
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-
-            await process.WaitForExitAsync(cts.Token);
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            return process.ExitCode == 0;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
+            await model.DownloadAsync(ct: cts.Token);
+            return true;
         }
         catch
         {
@@ -248,28 +232,13 @@ internal static class FoundryServiceHelper
 
         try
         {
-            var psi = new ProcessStartInfo("foundry")
-            {
-                Arguments = $"model load {modelAlias} --device GPU --ttl 1800",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start foundry load process.");
+            await EnsureSdkInitializedAsync();
+            var catalog = await FoundryLocalManager.Instance.GetCatalogAsync();
+            var model = await catalog.GetModelAsync(modelAlias);
+            if (model == null) return false;
 
             using var cts = new CancellationTokenSource(timeout.Value);
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-
-            await process.WaitForExitAsync(cts.Token);
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0)
-                return false;
+            await model.LoadAsync(ct: cts.Token);
 
             // Verify the GPU model appears in /v1/models
             for (int i = 0; i < 10; i++)
@@ -280,10 +249,6 @@ internal static class FoundryServiceHelper
             }
 
             return await IsModelAvailableAsync(modelAlias);
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
         }
         catch
         {
@@ -396,34 +361,56 @@ internal static class FoundryServiceHelper
             || afterAlias.StartsWith(t + ":"));
     }
 
+    /// <summary>
+    /// Polls the proxy server at <see cref="ServerBaseUrl"/> until it responds or the timeout elapses.
+    /// Returns true when the server is ready, false on timeout.
+    /// </summary>
+    public static async Task<bool> WaitForServerReadyAsync(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                var resp = await http.GetAsync($"{ServerBaseUrl}/api/foundry");
+                if ((int)resp.StatusCode < 500)
+                    return true;
+            }
+            catch { }
+            await Task.Delay(500);
+        }
+        return false;
+    }
+
+   private static async Task EnsureSdkInitializedAsync()
+   {
+       if (FoundryLocalManager.IsInitialized) return;
+
+       var modelCacheDir = Path.Combine(
+           Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+           ".foundry", "cache", "models");
+
+       await FoundryLocalManager.CreateAsync(
+           new Configuration
+           {
+               AppName = "foundry",
+               ModelCacheDir = modelCacheDir,
+               Web = new Configuration.WebService { Urls = "http://127.0.0.1:0" },
+           },
+           NullLogger.Instance);
+   }
+
    private static async Task<string?> DiscoverUrlAsync()
    {
        try
        {
-           var psi = new ProcessStartInfo("foundry")
-           {
-               Arguments = "service start",
-               UseShellExecute = false,
-               RedirectStandardOutput = true,
-               RedirectStandardError = true,
-           };
+           await EnsureSdkInitializedAsync();
 
-           using var process = Process.Start(psi)
-               ?? throw new InvalidOperationException("Failed to start foundry process.");
+           if (FoundryLocalManager.Instance.Urls is not { Length: > 0 })
+               await FoundryLocalManager.Instance.StartWebServiceAsync();
 
-           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-           var stdoutTask = process.StandardOutput.ReadToEndAsync();
-           var stderrTask = process.StandardError.ReadToEndAsync();
-
-           await process.WaitForExitAsync(cts.Token);
-
-           var combined = (await stdoutTask) + (await stderrTask);
-           var match = ServiceUrlPattern.Match(combined);
-           if (!match.Success)
-               return null;
-
-           return match.Groups[1].Value.TrimEnd('/');
+           return FoundryLocalManager.Instance.Urls?.FirstOrDefault();
        }
        catch
        {
