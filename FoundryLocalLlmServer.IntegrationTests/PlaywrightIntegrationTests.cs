@@ -21,20 +21,19 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Category", "GPU-Required")]
     public async Task AppHost_SendPrompt_ReturnsAssistantResponse_UsingGemma4Gpu()
     {
-        const string modelAlias = "gemma-4";
+        const string modelAlias = "phi-4-mini";
 
-        // Ensure Foundry Local is running and has at least one GPU model
         var foundryUrl = await FoundryServiceHelper.GetServiceUrlAsync();
         Assert.NotNull(foundryUrl);
         Assert.True(await FoundryServiceHelper.IsRunningAsync(),
-            "Foundry Local is not running. Start it with 'foundry service start'.");
+            "Foundry Local is not running. Run 'privatebuild.ps1 --check' to verify prerequisites.");
 
-        _output.WriteLine($"Ensuring GPU model ready: {modelAlias}");
-        var modelReady = await FoundryServiceHelper.EnsureGpuModelReadyAsync(modelAlias, _output);
-        Assert.True(modelReady,
-            $"Could not load GPU variant of {modelAlias}.");
+        _output.WriteLine($"Verifying GPU model ready: {modelAlias}");
+        Assert.True(await FoundryServiceHelper.IsGpuModelAvailableAsync(modelAlias),
+            $"GPU variant of '{modelAlias}' is not loaded. Run 'privatebuild.ps1 --check' to verify prerequisites.");
 
         // Verify wwwroot exists (frontend must be pre-built)
         var serverProjectDir = Path.GetFullPath(
@@ -60,7 +59,7 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
 
         try
         {
-            await WaitForServerReadyAsync("http://localhost:5537/api/foundry", TimeSpan.FromSeconds(30));
+            await WaitForServerReadyAsync("http://localhost:5538/api/foundry", TimeSpan.FromSeconds(30));
             _output.WriteLine("Server is ready.");
 
             // Run Playwright test
@@ -73,8 +72,8 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
             var page = await browser.NewPageAsync();
 
             // Navigate to the server (static files served from wwwroot)
-            _output.WriteLine("Navigating to http://localhost:5537/");
-            await page.GotoAsync("http://localhost:5537/");
+            _output.WriteLine("Navigating to http://localhost:5538/");
+            await page.GotoAsync("http://localhost:5538/");
 
             // Wait for the page to load and show the model name
             await page.WaitForSelectorAsync("text=Model:", new PageWaitForSelectorOptions
@@ -85,7 +84,7 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
 
             // Verify the frontend is configured to use gemma
             var configLineText = await page.Locator("p.config-line strong").First.TextContentAsync();
-            Assert.Contains("gemma", configLineText ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("phi", configLineText ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
             // Verify the page has the default prompt in the textarea
             var textarea = page.Locator("textarea");
@@ -163,7 +162,7 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
         var exePath = Path.Combine(
             repoRoot,
             "FoundryLocalLlmServer.Server",
-            "bin", "Debug", "net10.0",
+            "bin", "Release", "net10.0",
             "FoundryLocalLlmServer.Server.exe");
 
         if (!File.Exists(exePath))
@@ -189,7 +188,7 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
             WorkingDirectory = serverProjectDir,
         };
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
-        psi.Environment["ASPNETCORE_URLS"] = "http://localhost:5537";
+        psi.Environment["ASPNETCORE_URLS"] = "http://localhost:5538";
         psi.Environment["FoundryLocal__Endpoint"] = foundryEndpoint;
         psi.Environment["FoundryLocal__Model"] = model;
 

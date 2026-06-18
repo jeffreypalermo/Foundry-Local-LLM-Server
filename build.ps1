@@ -111,22 +111,20 @@ Function Stop-StubServer {
 }
 
 Function IntegrationTest {
-    # Only run tests that are safe without a real GPU / Foundry Local runtime:
-    #   OpenAiCompatibilityTests       — uses WebApplicationFactory + stub mode
-    #   FoundryServiceHelperAliasTests — pure logic, no server required
-    #
-    # Category!=GPU-Required is NOT used here: a test with multiple Category traits
-    # (Category=Integration AND Category=GPU-Required) would still be included
-    # because Category=Integration satisfies the != condition.
+    param([switch]$SkipGpu)
+
     Push-Location -Path $integrationTestProjectPath
     try {
-        exec {
-            & dotnet test -nologo -v $verbosity --logger:trx `
-                --results-directory (Join-Path $test_dir "IntegrationTests") `
-                --no-build --no-restore --configuration $projectConfig `
-                --filter "FullyQualifiedName~OpenAiCompatibilityTests|FullyQualifiedName~FoundryServiceHelperAliasTests" `
-                --collect:"XPlat Code Coverage"
+        $testArgs = @(
+            "test", "-nologo", "-v", $verbosity, "--logger:trx",
+            "--results-directory", (Join-Path $test_dir "IntegrationTests"),
+            "--no-build", "--no-restore", "--configuration", $projectConfig,
+            "--collect:XPlat Code Coverage"
+        )
+        if ($SkipGpu) {
+            $testArgs += @("--filter", "Category!=GPU-Required")
         }
+        exec { & dotnet @testArgs }
     }
     finally {
         Pop-Location
@@ -134,6 +132,8 @@ Function IntegrationTest {
 }
 
 Function Build {
+    param([switch]$SkipGpu)
+
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     try {
@@ -141,7 +141,7 @@ Function Build {
         Compile
         UnitTests
         Start-StubServer
-        IntegrationTest
+        IntegrationTest -SkipGpu:$SkipGpu
     }
     finally {
         Stop-StubServer
