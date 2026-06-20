@@ -19,6 +19,13 @@ builder.Services.Configure<OllamaFallbackOptions>(builder.Configuration.GetSecti
 string? _currentFoundryEndpoint = null;
 var _endpointLock = new SemaphoreSlim(1, 1);
 
+// Mutable active model — initialized from config, changed at runtime via POST /api/models/select.
+// Used as the default whenever a chat request omits an explicit "model" and surfaced by /api/foundry
+// so the SPA shows (and sends) the current selection.
+string _selectedModel = builder.Configuration["FoundryLocal:Model"] ?? "phi-4-mini";
+var _selectedModelLock = new object();
+string GetSelectedModel() { lock (_selectedModelLock) return _selectedModel; }
+
 // Serialize requests to Foundry — concurrent streaming requests crash the service
 var _foundryRequestGate = new SemaphoreSlim(1, 1);
 
@@ -137,8 +144,47 @@ app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
     return Results.Ok(new
     {
         value.Endpoint,
-        value.Model,
+        Model = GetSelectedModel(),
     });
+});
+
+// Selectable models for this server. The list is the configured AvailableModels (curated to the
+// GPU-compatible catalog for this host); falls back to the single configured Model when empty.
+app.MapGet("/api/models", (IOptions<FoundryLocalOptions> options) =>
+{
+    var available = options.Value.AvailableModels is { Length: > 0 } list
+        ? list
+        : [options.Value.Model];
+    return Results.Ok(new
+    {
+        current = GetSelectedModel(),
+        available,
+    });
+});
+
+// Change the active model. Only aliases present in AvailableModels are accepted (when that list is
+// configured); this just flips the default the proxy sends — Foundry loads the model lazily on the
+// next chat request. No code change is needed to grow the selectable set, only AvailableModels.
+app.MapPost("/api/models/select", async (HttpContext context, IOptions<FoundryLocalOptions> options, CancellationToken cancellationToken) =>
+{
+    var body = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+    var requested = body?["model"]?.GetValue<string>();
+    if (string.IsNullOrWhiteSpace(requested))
+        return Results.BadRequest(new { error = "Request body must include a non-empty \"model\"." });
+
+    var available = options.Value.AvailableModels ?? [];
+    if (available.Length > 0
+        && !available.Contains(requested, StringComparer.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new
+        {
+            error = $"Model '{requested}' is not in AvailableModels.",
+            available,
+        });
+    }
+
+    lock (_selectedModelLock) _selectedModel = requested;
+    return Results.Ok(new { current = requested });
 });
 
 // Cache of alias → (resolvedId, maxTotalTokens) — cleared when /v1/models is refreshed.
@@ -320,10 +366,18 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     var foundryOptions = options.Value;
     var ollama = ollamaOptions.Value;
 
+    // Default to the runtime-selected model when the client doesn't pin one, so POST
+    // /api/models/select governs which model serves model-less requests.
+    if (requestPayload is JsonObject reqObj
+        && (reqObj["model"] is null || string.IsNullOrWhiteSpace(reqObj["model"]!.GetValue<string>())))
+    {
+        reqObj["model"] = GetSelectedModel();
+    }
+
     if (foundryOptions.UseStubResponses)
     {
         var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
-        var model = requestPayload?["model"]?.GetValue<string>() ?? foundryOptions.Model;
+        var model = requestPayload?["model"]?.GetValue<string>() ?? GetSelectedModel();
         var isStreamingStub = requestPayload?["stream"]?.GetValue<bool>() == true;
 
         if (isStreamingStub)

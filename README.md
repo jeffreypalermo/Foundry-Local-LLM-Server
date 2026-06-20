@@ -12,20 +12,43 @@
 
 ## Foundry Local default model
 
-The server defaults to `gemma4` (`FoundryLocal:Model`).
+The server defaults to `phi-4-mini` (`FoundryLocal:Model`).
 
 ## Run Foundry Local
 
 ```bash
-foundry model run gemma4 --port 5273
+foundry model run phi-4-mini --port 5273
 ```
 
 The app is configured to use:
 
 - Foundry endpoint: `http://127.0.0.1:5273`
-- Model: `gemma4`
+- Model: `phi-4-mini`
 
 You can override in `FoundryLocalLlmServer.Server/appsettings*.json` or environment variables.
+
+## Models
+
+This host targets an **NVIDIA GeForce RTX 5070 Ti (16 GB)**. Every GPU variant in the
+Foundry Local catalog fits in 16 GB VRAM, so the full GPU-compatible catalog is included.
+`FoundryLocal:AvailableModels` lists the curated selectable aliases (chat, reasoning,
+coder, vision-language, and Whisper speech-to-text). Foundry's alias resolver prefers the
+CUDA/TensorRT-RTX GPU build of each model over NPU/CPU automatically.
+
+Model endpoints:
+
+- `GET /api/models` — `{ current, available[] }`, the selectable set and active model.
+- `POST /api/models/select` — `{ "model": "<alias>" }` switches the active model; Foundry
+  loads it lazily on the next chat request. Only aliases in `AvailableModels` are accepted.
+- `GET /v1/models` — OpenAI-format list proxied live from Foundry (what is loaded/cached).
+
+Adding or removing selectable models is a config-only change to `AvailableModels`.
+
+> **MAI models are out of scope (cloud-only).** Microsoft's MAI family — MAI-Thinking-1,
+> MAI-Image-2 / -Efficient, MAI-Voice-1, MAI-Transcribe-1 — runs only in **Microsoft
+> Foundry (Azure)**, not Foundry Local. There are no on-device ONNX/CUDA weights, so they
+> cannot run on this GPU. This server is local-only; reaching MAI would require a separate
+> Azure Foundry cloud route.
 
 ## Run the Aspire app
 
