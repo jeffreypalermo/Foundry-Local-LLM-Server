@@ -226,8 +226,13 @@ app.MapPost("/v1/audio/transcriptions", async (HttpContext context, IOptions<Fou
     var model = form["model"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(model)) model = GetSelectedModel();
 
+    // Optional language hint (e.g. "en"). Validated to a short alpha code to keep it shell-safe.
+    var language = form["language"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(language) && !Regex.IsMatch(language, "^[a-zA-Z]{2,8}$"))
+        language = null;
+
     if (options.Value.UseStubResponses)
-        return Results.Json(new { text = $"[stub transcript for {file.FileName}]" });
+        return Results.Json(new { text = $"[stub transcript for {file.FileName}]", model, language });
 
     // Persist the upload so the CLI can read it, preserving the extension Whisper expects.
     var ext = Path.GetExtension(file.FileName);
@@ -238,7 +243,8 @@ app.MapPost("/v1/audio/transcriptions", async (HttpContext context, IOptions<Fou
         await using (var fs = File.Create(tempPath))
             await file.CopyToAsync(fs, cancellationToken);
 
-        var output = await RunFoundryAsync($"transcribe -m {model} -f \"{tempPath}\" -o json", 240);
+        var langArg = string.IsNullOrWhiteSpace(language) ? "" : $" -l {language}";
+        var output = await RunFoundryAsync($"transcribe -m {model} -f \"{tempPath}\"{langArg} -o json", 240);
         var text = ParseFirstJson(output)?["text"]?.GetValue<string>();
         if (text is null)
         {

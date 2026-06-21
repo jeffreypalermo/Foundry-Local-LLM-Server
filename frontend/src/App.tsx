@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import './App.css';
+import { scenariosFor } from './scenarios';
+import type { Kind, Scenario, ToolPreset } from './scenarios';
 
-type FoundryConfig = {
-  endpoint: string;
-  model: string;
-};
+type FoundryConfig = { endpoint: string; model: string };
 
 type ModelInfo = {
   id: string;
@@ -18,25 +17,11 @@ type ModelInfo = {
   tools: boolean;
 };
 
-type ModelsResponse = {
-  current: string;
-  available: ModelInfo[];
-};
+type ModelsResponse = { current: string; available: ModelInfo[] };
 
-type ChatTurn = {
-  role: 'user' | 'assistant';
-  content: string;
-};
+type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
-// The capability panels a model can expose. "chat" covers text/code/reasoning (same transport,
-// different starter prompt); vision/tools/audio are distinct request shapes.
 type Mode = 'chat' | 'vision' | 'tools' | 'audio';
-
-const STARTER_PROMPTS: Record<string, string> = {
-  text: 'Explain why local OpenAI-compatible endpoints are useful.',
-  code: 'Write a Python function `total(nums)` that returns the sum of a list of integers.',
-  reasoning: 'If a train travels 60 km in 45 minutes, what is its average speed in km/h? Think step by step.',
-};
 
 function modesFor(model: ModelInfo | null): Mode[] {
   if (!model) return ['chat'];
@@ -55,40 +40,47 @@ const MODE_LABELS: Record<Mode, string> = {
   audio: 'Speech-to-text',
 };
 
+function kindFor(mode: Mode, model: ModelInfo | null): Kind {
+  if (mode === 'vision') return 'vision';
+  if (mode === 'tools') return 'tools';
+  if (mode === 'audio') return 'audio';
+  if (model?.code) return 'code';
+  if (model?.reasoning) return 'reasoning';
+  return 'text';
+}
+
 function App() {
   const [config, setConfig] = useState<FoundryConfig | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [mode, setMode] = useState<Mode>('chat');
 
-  const [prompt, setPrompt] = useState(STARTER_PROMPTS.text);
+  const [scenario, setScenario] = useState<Scenario | null>(null);
+  const [prompt, setPrompt] = useState('');
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  const [audioSampleUrl, setAudioSampleUrl] = useState<string | null>(null);
+  const [audioLanguage, setAudioLanguage] = useState<string | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const currentModel = useMemo(
-    () => models.find((m) => m.id === selected) ?? null,
-    [models, selected],
-  );
+  const currentModel = useMemo(() => models.find((m) => m.id === selected) ?? null, [models, selected]);
   const availableModes = useMemo(() => modesFor(currentModel), [currentModel]);
+  const kind = useMemo(() => kindFor(mode, currentModel), [mode, currentModel]);
+  const scenarios = useMemo(() => scenariosFor(kind), [kind]);
 
   // Load config + model catalog on startup.
   useEffect(() => {
     void (async () => {
       try {
-        const [cfgRes, modelsRes] = await Promise.all([
-          fetch('/api/foundry'),
-          fetch('/api/models'),
-        ]);
+        const [cfgRes, modelsRes] = await Promise.all([fetch('/api/foundry'), fetch('/api/models')]);
         if (!cfgRes.ok) throw new Error(`Could not load Foundry settings (${cfgRes.status})`);
         if (!modelsRes.ok) throw new Error(`Could not load model catalog (${modelsRes.status})`);
-        const cfg = (await cfgRes.json()) as FoundryConfig;
+        setConfig((await cfgRes.json()) as FoundryConfig);
         const list = (await modelsRes.json()) as ModelsResponse;
-        setConfig(cfg);
         setModels(list.available);
         setSelected(list.current);
       } catch (err: unknown) {
@@ -102,18 +94,28 @@ function App() {
     if (!availableModes.includes(mode)) setMode(availableModes[0]);
   }, [availableModes, mode]);
 
-  const resetPanels = () => {
+  // When the demo kind changes (mode/model switch), load that kind's first scenario.
+  useEffect(() => {
+    applyScenario(scenarios[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
+
+  function applyScenario(s: Scenario | undefined) {
+    if (!s) return;
+    setScenario(s);
     setChat([]);
-    setImageDataUrl(null);
-    setAudioFile(null);
     setTranscript(null);
     setError(null);
-  };
+    if (s.prompt !== undefined) setPrompt(s.prompt);
+    setImageDataUrl(s.image ?? null);
+    setAudioSampleUrl(s.audioUrl ?? null);
+    setAudioLanguage(s.language ?? null);
+    setAudioFile(null);
+  }
 
   const onSelectModel = async (event: ChangeEvent<HTMLSelectElement>) => {
     const model = event.target.value;
     setSelected(model);
-    resetPanels();
     try {
       const res = await fetch('/api/models/select', {
         method: 'POST',
@@ -127,16 +129,17 @@ function App() {
     }
   };
 
-  const switchMode = (next: Mode) => {
-    setMode(next);
-    resetPanels();
-    if (next === 'chat') {
-      const kind = currentModel?.code ? 'code' : currentModel?.reasoning ? 'reasoning' : 'text';
-      setPrompt(STARTER_PROMPTS[kind]);
-    }
-  };
+  // ── Senders ──────────────────────────────────────────────────────────────────
+  async function postChat(messages: unknown[], extra: Record<string, unknown> = {}) {
+    const res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: selected, messages, ...extra }),
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    return (await res.json()) as ChatCompletion;
+  }
 
-  // ── Chat / Code / Reasoning ───────────────────────────────────────────────────
   const sendChat = async (event: FormEvent) => {
     event.preventDefault();
     if (!prompt.trim() || busy) return;
@@ -145,22 +148,16 @@ function App() {
     const next: ChatTurn[] = [...chat, { role: 'user', content: prompt.trim() }];
     setChat(next);
     try {
-      const res = await fetch('/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selected, messages: next }),
-      });
-      const message = await readChatMessage(res);
-      setChat([...next, { role: 'assistant', content: message }]);
-      setPrompt('');
+      const payload = await postChat(next);
+      setChat([...next, { role: 'assistant', content: contentOf(payload) }]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Completion error');
+      setChat(next);
     } finally {
       setBusy(false);
     }
   };
 
-  // ── Vision ────────────────────────────────────────────────────────────────────
   const onPickImage = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -177,59 +174,59 @@ function App() {
     const next: ChatTurn[] = [...chat, { role: 'user', content: prompt.trim() }];
     setChat(next);
     try {
-      const res = await fetch('/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: selected,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: prompt.trim() },
-                { type: 'image_url', image_url: { url: imageDataUrl } },
-              ],
-            },
+      const payload = await postChat([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt.trim() },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
           ],
-        }),
-      });
-      const message = await readChatMessage(res);
-      setChat([...next, { role: 'assistant', content: message }]);
+        },
+      ]);
+      setChat([...next, { role: 'assistant', content: contentOf(payload) }]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Vision request error');
+      setChat(next);
     } finally {
       setBusy(false);
     }
   };
 
-  // ── Tools ─────────────────────────────────────────────────────────────────────
   const sendTools = async (event: FormEvent) => {
     event.preventDefault();
-    if (!prompt.trim() || busy) return;
+    if (!prompt.trim() || busy || !scenario) return;
     setBusy(true);
     setError(null);
-    const next: ChatTurn[] = [...chat, { role: 'user', content: prompt.trim() }];
-    setChat(next);
+    const userTurn: ChatTurn = { role: 'user', content: prompt.trim() };
+    setChat([userTurn]);
     try {
-      const res = await fetch('/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: selected,
-          messages: next,
-          tools: [WEATHER_TOOL],
-          tool_choice: 'auto',
-        }),
-      });
-      if (!res.ok) throw new Error(await readError(res));
-      const payload = (await res.json()) as ToolCompletion;
-      const choice = payload.choices?.[0]?.message;
-      const calls = choice?.tool_calls ?? [];
-      const text = calls.length > 0
-        ? `🛠 tool_calls:\n${calls.map((c) => `${c.function?.name}(${c.function?.arguments})`).join('\n')}`
-        : choice?.content ?? 'No content returned.';
-      setChat([...next, { role: 'assistant', content: text }]);
-      setPrompt('');
+      const tools = toolsFor(scenario.tools ?? 'weather');
+      const toolChoice = toolChoiceArg(scenario.toolChoice);
+      const first = await postChat([userTurn], { tools, tool_choice: toolChoice });
+      const msg = first.choices?.[0]?.message;
+      const calls = msg?.tool_calls ?? [];
+
+      if (calls.length > 0) {
+        const callLines = calls.map((c) => `🛠 ${c.function?.name}(${c.function?.arguments})`).join('\n');
+        // Multi-turn loop: feed a synthetic tool result back for a final answer.
+        if (scenario.followUpToolResult) {
+          const assistantMsg = { role: 'assistant', content: msg?.content ?? '', tool_calls: calls };
+          const toolMsgs = calls.map((c) => ({
+            role: 'tool',
+            tool_call_id: c.id ?? c.function?.name ?? 'call_0',
+            content: scenario.followUpToolResult,
+          }));
+          const second = await postChat([userTurn, assistantMsg, ...toolMsgs], { tools });
+          setChat([
+            userTurn,
+            { role: 'assistant', content: `${callLines}\n↩ tool result: ${scenario.followUpToolResult}\n\n${contentOf(second)}` },
+          ]);
+        } else {
+          setChat([userTurn, { role: 'assistant', content: callLines }]);
+        }
+      } else {
+        setChat([userTurn, { role: 'assistant', content: msg?.content ?? 'No content returned.' }]);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Tool request error');
     } finally {
@@ -237,17 +234,29 @@ function App() {
     }
   };
 
-  // ── Audio / speech-to-text ──────────────────────────────────────────────────────
   const sendAudio = async (event: FormEvent) => {
     event.preventDefault();
-    if (!audioFile || busy) return;
+    if (busy) return;
+    if (!audioFile && !audioSampleUrl) return;
     setBusy(true);
     setError(null);
     setTranscript(null);
     try {
+      let blob: Blob;
+      let filename: string;
+      if (audioFile) {
+        blob = audioFile;
+        filename = audioFile.name;
+      } else {
+        const r = await fetch(audioSampleUrl!);
+        if (!r.ok) throw new Error(`Could not load sample clip (${r.status})`);
+        blob = await r.blob();
+        filename = audioSampleUrl!.split('/').pop() ?? 'audio.wav';
+      }
       const form = new FormData();
       form.append('model', selected);
-      form.append('file', audioFile);
+      form.append('file', blob, filename);
+      if (audioLanguage) form.append('language', audioLanguage);
       const res = await fetch('/v1/audio/transcriptions', { method: 'POST', body: form });
       if (!res.ok) throw new Error(await readError(res));
       const payload = (await res.json()) as { text?: string };
@@ -297,7 +306,7 @@ function App() {
               key={m}
               type="button"
               className={`mode-tab ${m === mode ? 'active' : ''}`}
-              onClick={() => switchMode(m)}
+              onClick={() => setMode(m)}
               disabled={busy}
             >
               {MODE_LABELS[m]}
@@ -306,17 +315,36 @@ function App() {
         </nav>
       )}
 
+      <section className="scenarios" aria-label="Demo scenarios">
+        <p className="scenarios-title">Demo scenarios — {kind}:</p>
+        <div className="scenario-chips">
+          {scenarios.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              data-testid={`scenario-${s.id}`}
+              className={`scenario-chip ${scenario?.id === s.id ? 'active' : ''}`}
+              onClick={() => applyScenario(s)}
+              disabled={busy}
+              title={s.hint}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        {scenario && <p className="scenario-hint">{scenario.hint}</p>}
+      </section>
+
       {error && <p className="error">{error}</p>}
 
       {mode === 'chat' && (
-        <ChatLikePanel
-          prompt={prompt}
-          setPrompt={setPrompt}
-          onSubmit={sendChat}
-          busy={busy}
-          ready={!!config}
-          chat={chat}
-        />
+        <section className="panel" aria-label="Text chat">
+          <form onSubmit={sendChat} className="prompt-form">
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Enter a prompt" rows={5} disabled={busy} />
+            <button type="submit" disabled={busy || !config}>{busy ? 'Running...' : 'Send Prompt'}</button>
+          </form>
+          <ChatLog chat={chat} />
+        </section>
       )}
 
       {mode === 'vision' && (
@@ -324,16 +352,8 @@ function App() {
           <form onSubmit={sendVision} className="prompt-form">
             <input type="file" accept="image/*" onChange={onPickImage} disabled={busy} aria-label="Image" />
             {imageDataUrl && <img className="preview" src={imageDataUrl} alt="selected" />}
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Ask about the image"
-              rows={3}
-              disabled={busy}
-            />
-            <button type="submit" disabled={busy || !imageDataUrl}>
-              {busy ? 'Running...' : 'Describe Image'}
-            </button>
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask about the image" rows={3} disabled={busy} />
+            <button type="submit" disabled={busy || !imageDataUrl}>{busy ? 'Running...' : 'Describe Image'}</button>
           </form>
           <ChatLog chat={chat} />
         </section>
@@ -341,15 +361,9 @@ function App() {
 
       {mode === 'tools' && (
         <section className="panel" aria-label="Tools">
-          <p className="hint">Exposes a <code>get_weather(city)</code> function. The model may answer in text or emit a tool call.</p>
+          <p className="hint">Tools available: <code>get_weather(city)</code>, <code>calculate(expression)</code>. The model may answer in text or emit tool calls.</p>
           <form onSubmit={sendTools} className="prompt-form">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. What's the weather in Paris?"
-              rows={3}
-              disabled={busy}
-            />
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. What's the weather in Paris?" rows={3} disabled={busy} />
             <button type="submit" disabled={busy}>{busy ? 'Running...' : 'Send with Tools'}</button>
           </form>
           <ChatLog chat={chat} />
@@ -359,14 +373,12 @@ function App() {
       {mode === 'audio' && (
         <section className="panel" aria-label="Speech-to-text">
           <form onSubmit={sendAudio} className="prompt-form">
-            <input
-              type="file"
-              accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg"
-              onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)}
-              disabled={busy}
-              aria-label="Audio file"
-            />
-            <button type="submit" disabled={busy || !audioFile}>{busy ? 'Transcribing...' : 'Transcribe'}</button>
+            <p className="hint">
+              {audioFile ? `File: ${audioFile.name}` : audioSampleUrl ? `Built-in clip: ${audioSampleUrl}` : 'Choose a built-in clip or upload audio.'}
+              {audioLanguage ? ` · language=${audioLanguage}` : ''}
+            </p>
+            <input type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg" onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)} disabled={busy} aria-label="Audio file" />
+            <button type="submit" disabled={busy || (!audioFile && !audioSampleUrl)}>{busy ? 'Transcribing...' : 'Transcribe'}</button>
           </form>
           {transcript !== null && (
             <article className="message assistant">
@@ -377,34 +389,6 @@ function App() {
         </section>
       )}
     </main>
-  );
-}
-
-// Shared text-chat panel — preserves the selectors used by the Playwright e2e suite.
-function ChatLikePanel(props: {
-  prompt: string;
-  setPrompt: (v: string) => void;
-  onSubmit: (e: FormEvent) => void;
-  busy: boolean;
-  ready: boolean;
-  chat: ChatTurn[];
-}) {
-  return (
-    <section className="panel" aria-label="Text chat">
-      <form onSubmit={props.onSubmit} className="prompt-form">
-        <textarea
-          value={props.prompt}
-          onChange={(e) => props.setPrompt(e.target.value)}
-          placeholder="Enter a prompt"
-          rows={4}
-          disabled={props.busy}
-        />
-        <button type="submit" disabled={props.busy || !props.ready}>
-          {props.busy ? 'Running...' : 'Send Prompt'}
-        </button>
-      </form>
-      <ChatLog chat={props.chat} />
-    </section>
   );
 }
 
@@ -423,8 +407,8 @@ function ChatLog({ chat }: { chat: ChatTurn[] }) {
 
 // ── Helpers / types ───────────────────────────────────────────────────────────────
 
-type ToolCall = { function?: { name?: string; arguments?: string } };
-type ToolCompletion = {
+type ToolCall = { id?: string; function?: { name?: string; arguments?: string } };
+type ChatCompletion = {
   choices?: Array<{ message?: { content?: string; tool_calls?: ToolCall[] } }>;
 };
 
@@ -433,13 +417,33 @@ const WEATHER_TOOL = {
   function: {
     name: 'get_weather',
     description: 'Get the current weather for a city',
-    parameters: {
-      type: 'object',
-      properties: { city: { type: 'string' } },
-      required: ['city'],
-    },
+    parameters: { type: 'object', properties: { city: { type: 'string', description: 'City name' } }, required: ['city'] },
   },
 };
+
+const CALCULATE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'calculate',
+    description: 'Evaluate a math expression',
+    parameters: { type: 'object', properties: { expression: { type: 'string', description: 'A math expression' } }, required: ['expression'] },
+  },
+};
+
+function toolsFor(preset: ToolPreset): unknown[] {
+  if (preset === 'weather') return [WEATHER_TOOL];
+  if (preset === 'calculate') return [CALCULATE_TOOL];
+  return [WEATHER_TOOL, CALCULATE_TOOL];
+}
+
+function toolChoiceArg(choice: 'auto' | string | undefined): unknown {
+  if (!choice || choice === 'auto') return 'auto';
+  return { type: 'function', function: { name: choice } };
+}
+
+function contentOf(payload: ChatCompletion): string {
+  return payload.choices?.[0]?.message?.content ?? 'No completion text returned.';
+}
 
 async function readError(res: Response): Promise<string> {
   try {
@@ -448,12 +452,6 @@ async function readError(res: Response): Promise<string> {
   } catch {
     return `Request failed (${res.status})`;
   }
-}
-
-async function readChatMessage(res: Response): Promise<string> {
-  if (!res.ok) throw new Error(await readError(res));
-  const payload = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return payload.choices?.[0]?.message?.content ?? 'No completion text returned.';
 }
 
 export default App;
