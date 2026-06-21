@@ -150,6 +150,32 @@ test.describe('Scenario behavior — live', () => {
     await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
   });
 
+  test('switching models clears the previous conversation', async ({ page }) => {
+    test.setTimeout(LONG);
+    await load(page);
+    await selectModel(page, 'qwen3-0.6b');
+    await page.getByTestId('scenario-qa').click();
+    await page.locator('button:has-text("Send Prompt")').click();
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    expect(await page.locator('article.message').count()).toBeGreaterThan(0);
+
+    // Switch to another text model (same kind) — the stale transcript must be cleared.
+    await selectModel(page, 'qwen2.5-0.5b');
+    await expect(page.locator('article.message')).toHaveCount(0);
+  });
+
+  test('tools: full tool loop (multi-turn role:tool)', async ({ page }) => {
+    test.setTimeout(LONG);
+    await load(page);
+    await selectModel(page, 'phi-4-mini');
+    await switchTab(page, 'Tools');
+    await page.getByTestId('scenario-multiturn').click();
+    await page.locator('button:has-text("Send with Tools")').click();
+    // Must produce an assistant message and NOT surface an error (the daemon must accept role:tool).
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    await expect(page.locator('p.error')).toHaveCount(0);
+  });
+
   test('tools: calculator', async ({ page }) => {
     test.setTimeout(LONG);
     await load(page);

@@ -116,6 +116,12 @@ function App() {
   const onSelectModel = async (event: ChangeEvent<HTMLSelectElement>) => {
     const model = event.target.value;
     setSelected(model);
+    // Clear the previous model's conversation/result so stale output isn't attributed to the new
+    // model. (The scenario-reset effect only fires when the demo *kind* changes, so same-kind
+    // switches — e.g. text→text — would otherwise leave the old transcript on screen.)
+    setChat([]);
+    setTranscript(null);
+    setError(null);
     try {
       const res = await fetch('/api/models/select', {
         method: 'POST',
