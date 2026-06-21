@@ -520,6 +520,18 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
         reqObj["model"] = GetSelectedModel();
     }
 
+    // Bound the request so a single call can't blow up the in-process Foundry CUDA KV-cache arena:
+    // cap max_tokens to MaxResponseTokens and trim an ever-growing conversation to MaxPromptTokens.
+    // Applied to every request (stub + real) and surfaced via diagnostic headers.
+    if (requestPayload is JsonObject boundsObj)
+    {
+        var bounds = OpenAiChatHelpers.ApplyContextBounds(
+            boundsObj, foundryOptions.MaxPromptTokens, foundryOptions.MaxResponseTokens, modelTotalCap: 0);
+        context.Response.Headers["X-Context-Dropped-Messages"] = bounds.DroppedMessages.ToString();
+        context.Response.Headers["X-Context-Max-Tokens"] = bounds.MaxTokens.ToString();
+        context.Response.Headers["X-Context-Input-Tokens"] = bounds.InputTokens.ToString();
+    }
+
     if (foundryOptions.UseStubResponses)
     {
         var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
