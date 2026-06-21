@@ -508,7 +508,15 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
 
 app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IOptions<OllamaFallbackOptions> ollamaOptions, IHttpClientFactory httpClientFactory, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
-    var requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+    JsonNode? requestPayload;
+    try
+    {
+        requestPayload = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.BadRequest(new { error = "Request body is not valid JSON." });
+    }
     var foundryOptions = options.Value;
     var ollama = ollamaOptions.Value;
 
