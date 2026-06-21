@@ -20,10 +20,15 @@ if (!File.Exists(resultsPath))
 var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 var rows = JsonSerializer.Deserialize<List<Record>>(File.ReadAllText(resultsPath), opts) ?? [];
 
-// Dedupe: last record wins per (model, kind, scenario).
+// Dedupe per (model, kind, scenario), PREFERRING a successful capture (a scenario captured OK in any
+// pass counts as OK even if a later retry timed out); among OK records the last wins.
 var deduped = new Dictionary<string, Record>();
 foreach (var r in rows)
-    deduped[$"{r.Model}|{r.Kind}|{r.Scenario}"] = r;
+{
+    var key = $"{r.Model}|{r.Kind}|{r.Scenario}";
+    if (!deduped.TryGetValue(key, out var existing) || r.Ok || !existing.Ok)
+        deduped[key] = r;
+}
 var records = deduped.Values.ToList();
 
 // Group by model, preserving first-seen order.

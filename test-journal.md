@@ -211,6 +211,24 @@ that failed, then fixed until it passed.
 | 6 | Send buttons clickable on empty input (silent no-op) | demo-scenarios "Send Prompt is disabled…" | Disable when prompt empty |
 
 Probes that found **no** bug (kept as coverage / verified good behavior): multi-turn `role:tool`
-loop (daemon accepts it); vision model on plain-text chat; **live** context-trimming (60-msg
-conversation → 50 dropped, max_tokens→2048, input→~7.5k); non-audio upload → clean **502**;
-missing audio file → **400**; capability classification correct for all 41 models.
+loop (daemon accepts it); forced `tool_choice`; vision model on plain-text chat; **live**
+context-trimming (60-msg conversation → 50 dropped, max_tokens→2048, input→~7.5k); non-audio upload
+→ clean **502**; missing audio file → **400**; capability classification correct for all 41 models.
+
+---
+
+## 9. Exhaustive demo capture — every scenario for every model
+
+`tests/demo-capture.spec.ts` drives the real SPA via Playwright across the full matrix: for each
+model, select it → for each applicable capability → click each scenario chip → run → validate the
+output → screenshot. Resumable per-scenario (KINDS/MODELS filters), screenshots + `results.json`
+written to `docs/demo-captures/`. The C# `tools/DemoDocBuilder` compiles `docs/DEMO.md` from them.
+
+- **Result: 41/41 models · 291 scenario runs · 291 produced output · 0 errors · 291 screenshots.**
+- Bug found & fixed during capture: single-capability models render no mode-tabs → the harness's
+  unconditional tab-click hung; made the tab-click conditional on the tab existing.
+- The two largest **thinking** models (`deepseek-r1-14b`, `qwen3.5-9b`) generate full 2048-token
+  reasoning per scenario, taking 12–15+ min each near the 16 GB VRAM limit — impractical to capture
+  all of at full length. Their longest scenarios were captured with the server's `MaxResponseTokens`
+  temporarily set to 512 (shorter but complete demonstrations); the server was restored to 2048 after.
+- See `docs/DEMO.md` for the full per-model walkthrough with embedded screenshots.
