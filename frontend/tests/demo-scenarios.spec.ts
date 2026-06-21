@@ -107,6 +107,47 @@ test.describe('Scenario chips — structure', () => {
   });
 });
 
+// ── Multi-turn conversations ──────────────────────────────────────────────────────
+
+test.describe('Multi-turn conversations', () => {
+  test('structure: text model has a multi-turn scenario that shows scripted turns', async ({ page }) => {
+    await load(page);
+    await selectModel(page, 'phi-4-mini');
+    await page.getByTestId('scenario-conversation').click();
+    await expect(page.getByTestId('run-conversation')).toBeVisible();
+    await expect(page.locator('.turn-list li')).toHaveCount(3);
+  });
+
+  test('live: scripted conversation retains context across turns', async ({ page }) => {
+    test.setTimeout(LONG);
+    await load(page);
+    await selectModel(page, 'qwen2.5-1.5b');
+    await page.getByTestId('scenario-conversation').click();
+    await page.getByTestId('run-conversation').click();
+    // 3 user + 3 assistant once the scripted conversation completes.
+    await expect(page.locator('article.message.assistant p')).toHaveCount(3, { timeout: LONG });
+    await expect(page.locator('article.message.user p')).toHaveCount(3);
+    const transcript = (await page.locator('article.message p').allTextContents()).join(' ').toLowerCase();
+    // The model should recall something it was told earlier (name or pet).
+    expect(/alice|max|retriever|golden/.test(transcript)).toBe(true);
+  });
+
+  test('live: free-form follow-up continues the conversation', async ({ page }) => {
+    test.setTimeout(LONG);
+    await load(page);
+    await selectModel(page, 'qwen3-0.6b');
+    await page.locator('textarea').fill('My favorite color is teal. Acknowledge briefly.');
+    await page.locator('button:has-text("Send Prompt")').click();
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    await page.locator('textarea').fill('What did I say my favorite color was?');
+    await page.locator('button:has-text("Send Prompt")').click();
+    await expect(page.locator('article.message.user p')).toHaveCount(2, { timeout: LONG });
+    await expect(page.locator('article.message.assistant p')).toHaveCount(2, { timeout: LONG });
+    const transcript = (await page.locator('article.message p').allTextContents()).join(' ').toLowerCase();
+    expect(transcript).toContain('teal');
+  });
+});
+
 // ── Behavior: representative live runs (inference) ────────────────────────────────
 
 test.describe('Scenario behavior — live', () => {

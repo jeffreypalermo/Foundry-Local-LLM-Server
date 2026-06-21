@@ -21,13 +21,15 @@ const ASSET_IMG = path.resolve(__dirname, 'assets/green-circle.png');
 const ASSET_WAV = path.resolve(__dirname, 'assets/speech.wav');
 
 const SCENARIOS: Record<string, string[]> = {
-  text: ['qa', 'summarize', 'translate', 'sentiment', 'extract', 'rewrite'],
-  code: ['generate', 'explain', 'bug', 'tests', 'translate'],
-  reasoning: ['math', 'logic', 'plan', 'compare', 'estimate'],
+  text: ['qa', 'summarize', 'translate', 'sentiment', 'extract', 'rewrite', 'conversation'],
+  code: ['generate', 'explain', 'bug', 'tests', 'translate', 'iterate'],
+  reasoning: ['math', 'logic', 'plan', 'compare', 'estimate', 'followup'],
   vision: ['describe', 'ocr', 'color', 'count', 'sceneqa', 'upload'],
   tools: ['weather', 'calculate', 'both', 'forced', 'multiturn'],
   audio: ['pangram', 'numbers', 'pangram-en', 'numbers-en', 'upload'],
 };
+// Scripted multi-turn conversations use the "Run conversation" button instead of the single-send button.
+const MULTITURN = new Set(['conversation', 'iterate', 'followup']);
 const RUN_BUTTON: Record<string, string> = {
   text: 'Send Prompt', code: 'Send Prompt', reasoning: 'Send Prompt',
   vision: 'Describe Image', tools: 'Send with Tools', audio: 'Transcribe',
@@ -96,15 +98,26 @@ for (const m of models) {
           if (kind === 'vision' && sid === 'upload') await page.locator('input[aria-label="Image"]').setInputFiles(ASSET_IMG);
           if (kind === 'audio' && sid === 'upload') await page.locator('input[aria-label="Audio file"]').setInputFiles(ASSET_WAV);
 
-          const prompt = await page.locator('textarea').inputValue().catch(() => '');
-          rec.prompt = prompt;
-
-          await page.locator(`button:has-text("${RUN_BUTTON[kind]}")`).click();
-          const reply = page.locator('article.message.assistant p').first();
-          await reply.waitFor({ state: 'visible', timeout: 15 * 60 * 1000 });
-          const out = (await reply.textContent()) ?? '';
-          rec.output = out.slice(0, 4000);
-          rec.ok = out.trim().length > 0;
+          if (MULTITURN.has(sid)) {
+            // Scripted multi-turn conversation: capture the turns as the "prompt", run the whole
+            // conversation, and capture the final assistant turn.
+            rec.prompt = (await page.locator('.turn-list li').allTextContents()).join(' → ');
+            await page.getByTestId('run-conversation').click();
+            const turns = (rec.prompt as string).split(' → ').length;
+            const replies = page.locator('article.message.assistant p');
+            await expect(replies).toHaveCount(turns, { timeout: 15 * 60 * 1000 });
+            const out = (await replies.last().textContent()) ?? '';
+            rec.output = out.slice(0, 4000);
+            rec.ok = out.trim().length > 0;
+          } else {
+            rec.prompt = await page.locator('textarea').inputValue().catch(() => '');
+            await page.locator(`button:has-text("${RUN_BUTTON[kind]}")`).click();
+            const reply = page.locator('article.message.assistant p').first();
+            await reply.waitFor({ state: 'visible', timeout: 15 * 60 * 1000 });
+            const out = (await reply.textContent()) ?? '';
+            rec.output = out.slice(0, 4000);
+            rec.ok = out.trim().length > 0;
+          }
         } catch (e) {
           rec.error = String(e).slice(0, 400);
         }

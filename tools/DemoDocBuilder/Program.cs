@@ -141,9 +141,9 @@ partial class Program
     };
     static readonly Dictionary<string, Dictionary<string, string>> Labels = new()
     {
-        ["text"] = new() { ["qa"] = "Q&A", ["summarize"] = "Summarize", ["translate"] = "Translate", ["sentiment"] = "Classify", ["extract"] = "Extract JSON", ["rewrite"] = "Rewrite" },
-        ["code"] = new() { ["generate"] = "Generate", ["explain"] = "Explain", ["bug"] = "Find the bug", ["tests"] = "Write tests", ["translate"] = "Port language" },
-        ["reasoning"] = new() { ["math"] = "Word problem", ["logic"] = "Logic puzzle", ["plan"] = "Plan", ["compare"] = "Compare", ["estimate"] = "Estimate" },
+        ["text"] = new() { ["qa"] = "Q&A", ["summarize"] = "Summarize", ["translate"] = "Translate", ["sentiment"] = "Classify", ["extract"] = "Extract JSON", ["rewrite"] = "Rewrite", ["conversation"] = "Multi-turn chat" },
+        ["code"] = new() { ["generate"] = "Generate", ["explain"] = "Explain", ["bug"] = "Find the bug", ["tests"] = "Write tests", ["translate"] = "Port language", ["iterate"] = "Iterative coding" },
+        ["reasoning"] = new() { ["math"] = "Word problem", ["logic"] = "Logic puzzle", ["plan"] = "Plan", ["compare"] = "Compare", ["estimate"] = "Estimate", ["followup"] = "Follow-up reasoning" },
         ["vision"] = new() { ["describe"] = "Describe", ["ocr"] = "Read text (OCR)", ["color"] = "Shape & color", ["count"] = "Count", ["sceneqa"] = "Visual Q&A", ["upload"] = "Upload your own" },
         ["tools"] = new() { ["weather"] = "Weather", ["calculate"] = "Calculator", ["both"] = "Two tools", ["forced"] = "Forced tool", ["multiturn"] = "Full tool loop" },
         ["audio"] = new() { ["pangram"] = "Pangram clip", ["numbers"] = "Numbers clip", ["pangram-en"] = "Pangram (lang=en)", ["numbers-en"] = "Numbers (lang=en)", ["upload"] = "Upload" },

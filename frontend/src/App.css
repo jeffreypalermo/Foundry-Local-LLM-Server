@@ -157,6 +157,26 @@ button {
   gap: 0.75rem;
 }
 
+.conversation-runner {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed #c7d2fe;
+  border-radius: 0.5rem;
+  background: #fbfbff;
+}
+
+.turn-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.turn-list li {
+  margin: 0.15rem 0;
+}
+
 .hint {
   margin: 0;
   font-size: 0.9rem;

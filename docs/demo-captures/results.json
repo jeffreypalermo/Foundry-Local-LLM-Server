@@ -3849,5 +3849,77 @@
     "ms": 292227,
     "screenshot": "qwen3.5-9b__vision__upload.png",
     "at": "2026-06-21T12:52:33.450Z"
+  },
+  {
+    "model": "phi-4-mini",
+    "kind": "text",
+    "scenario": "conversation",
+    "ok": true,
+    "output": "You mentioned that your name is Alice.",
+    "error": "",
+    "prompt": "My name is Alice and I have a golden retriever named Max. → What kind of pet do I have, and what is its name? → Remind me — what did I say my name was?",
+    "ms": 4518,
+    "screenshot": "phi-4-mini__text__conversation.png",
+    "at": "2026-06-21T19:41:26.668Z"
+  },
+  {
+    "model": "qwen3-0.6b",
+    "kind": "text",
+    "scenario": "conversation",
+    "ok": true,
+    "output": "<think>\nOkay, the user is asking what they said about their name. Let me check the conversation history.\n\nThe user mentioned their name is Alice and their golden retriever is Max. The user seems to be asking about their pet, but the current question is a direct question about their name. \n\nSince the user is asking for what they said about their name, but the previous messages were about their pet, the current question seems to be a repetition or a miscommunication. \n\nTherefore, the assistant should acknowledge the user's question and ask if there's anything specific they'd like to discuss.",
+    "error": "",
+    "prompt": "My name is Alice and I have a golden retriever named Max. → What kind of pet do I have, and what is its name? → Remind me — what did I say my name was?",
+    "ms": 6032,
+    "screenshot": "qwen3-0.6b__text__conversation.png",
+    "at": "2026-06-21T19:41:33.509Z"
+  },
+  {
+    "model": "qwen3-8b",
+    "kind": "text",
+    "scenario": "conversation",
+    "ok": true,
+    "output": "<think>\nOkay, the user is asking, \"Remind me — what did I say my name was?\" \n\nLooking back at the conversation history, the user introduced themselves as Alice. They also mentioned their golden retriever named Max.\n\nSo, the user is asking to be reminded of their own name, which they previously stated as Alice.\n\nThe response should clearly state that the user's name is Alice, as they previously mentioned. The tone should remain friendly and helpful, as per the user's previous message.\n</think>\n\nYou said your name is **Alice**! 😊 And you’ve got a wonderful golden retriever named **Max**. 🐾",
+    "error": "",
+    "prompt": "My name is Alice and I have a golden retriever named Max. → What kind of pet do I have, and what is its name? → Remind me — what did I say my name was?",
+    "ms": 224740,
+    "screenshot": "qwen3-8b__text__conversation.png",
+    "at": "2026-06-21T19:45:19.017Z"
+  },
+  {
+    "model": "qwen2.5-coder-0.5b",
+    "kind": "code",
+    "scenario": "iterate",
+    "ok": true,
+    "output": "Certainly! Below is an updated version of the `add` function along with a docstring explaining its purpose, parameters, and return value:\n\n```python\ndef add(a: Union[int, float], b: Union[int, float]) -> Union[int, float]:\n    \"\"\"\n    This function takes two parameters and returns their sum.\n\n    Parameters:\n    a (Union[int, float]): The first number.\n    b (Union[int, float]): The second number.\n\n    Returns:\n    Union[int, float]: The sum of 'a' and 'b'.\n    \"\"\"\n    # Type hints for clarity\n    # We don't need to explicitly state that a and b are float, as they will be automatically inferred\n    return a + b\n\n# Usage example\nprint(add(5, 10))  # Output: 15\nprint(add(-2, -3)) # Output: -5\nprint(add(0, 0))  # Output: 0\nprint(add(7, 7))  # Output: 14\n```\n\n### Explanation:\n\n- **Type Hint**: We've used `Union[int, float]` and `ReturnType[Union[int, float]]` to indicate that the function expects two parameters that can either be integers or floats and returns either integers or floats. The `int` and `float` type are used as examples, but you can replace them with any other valid types if needed.",
+    "error": "",
+    "prompt": "Write a Python function add(a, b) that returns their sum. → Now add type hints to it. → Now add a docstring and one usage example.",
+    "ms": 15636,
+    "screenshot": "qwen2.5-coder-0.5b__code__iterate.png",
+    "at": "2026-06-21T19:45:35.421Z"
+  },
+  {
+    "model": "deepseek-r1-1.5b",
+    "kind": "reasoning",
+    "scenario": "followup",
+    "ok": true,
+    "output": "<think>\nOkay, so I need to figure out the final price of 12 apples after applying a 10% discount. Let me break this down step by step.\n\nFirst, I know that the total cost for 12 apples before any discount is \\$24, as I calculated earlier.\n\nNow, I need to apply a 10% discount to this total. A 10% discount means I'm taking away 10% of the original price. So, I need to find out what 10% of \\$24 is and then subtract that from the original price.\n\nLet me calculate 10% of \\$24:\n\\[\n10\\% \\text{ of } \\$24 = 0.10 \\times 24 = \\$2.40\n\\]\n\nNow, I subtract this discount from the original total price:\n\\[\n\\$24 - \\$2.40 = \\$21.60\n\\]\n\nSo, after applying a 10% discount, the final price for 12 apples would be \\$21.60.\n\nWait a minute, let me double-check my calculations to make sure I didn't make any mistakes. \n\nCalculating 10% of \\$24:\n\\[\n0.10 \\times 24 = 2.40\n\\]\n\nSubtracting the discount:\n\\[\n24 - 2.40 = 21.60\n\\]\n\nYes, that seems correct. So, the final price after a 10% discount is indeed \\$21.60.\n\nAlternatively, I can think of it as paying 90% of the original price since I'm taking away 10%:\n\\[\n90\\% \\text{ of } \\$24 = 0.90 \\times 24 = 21.60\n\\]\n\nThis confirms that the final price is \\$21.60.\n\nI can also express this final price in dollars and cents:\n\\[\n\\$21.60\n\\]\n\nSo, after applying a 10% discount to the original total price of \\$24, the final price for 12 apples is \\$21.60.\n\n**Final Answer:**\n\\[\n\\boxed{\\$21.60}\n\\]",
+    "error": "",
+    "prompt": "A shop sells apples at $2 each. How much do 5 apples cost? → And if I buy 12 apples instead? → Now apply a 10% discount to that 12-apple total. What is the final price?",
+    "ms": 24342,
+    "screenshot": "deepseek-r1-1.5b__reasoning__followup.png",
+    "at": "2026-06-21T19:46:00.544Z"
+  },
+  {
+    "model": "mistral-7b-v0.2",
+    "kind": "text",
+    "scenario": "conversation",
+    "ok": true,
+    "output": " Your name is Alice.",
+    "error": "",
+    "prompt": "My name is Alice and I have a golden retriever named Max. → What kind of pet do I have, and what is its name? → Remind me — what did I say my name was?",
+    "ms": 6030,
+    "screenshot": "mistral-7b-v0.2__text__conversation.png",
+    "at": "2026-06-21T19:46:07.318Z"
   }
 ]

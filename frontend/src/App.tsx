@@ -107,6 +107,7 @@ function App() {
     setTranscript(null);
     setError(null);
     if (s.prompt !== undefined) setPrompt(s.prompt);
+    else if (s.turns) setPrompt(''); // scripted conversation — prompt box is for free-form follow-ups
     setImageDataUrl(s.image ?? null);
     setAudioSampleUrl(s.audioUrl ?? null);
     setAudioLanguage(s.language ?? null);
@@ -159,6 +160,27 @@ function App() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Completion error');
       setChat(next);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Runs a scripted multi-turn conversation, accumulating context so the model's memory is visible.
+  const runConversation = async (turns: string[]) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    let convo: ChatTurn[] = [];
+    try {
+      for (const turn of turns) {
+        convo = [...convo, { role: 'user', content: turn }];
+        setChat(convo);
+        const payload = await postChat(convo);
+        convo = [...convo, { role: 'assistant', content: contentOf(payload) }];
+        setChat(convo);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Conversation error');
     } finally {
       setBusy(false);
     }
@@ -345,8 +367,25 @@ function App() {
 
       {mode === 'chat' && (
         <section className="panel" aria-label="Text chat">
+          {scenario?.turns && (
+            <div className="conversation-runner">
+              <p className="hint">Scripted {scenario.turns.length}-turn conversation (demonstrates context memory):</p>
+              <ol className="turn-list">
+                {scenario.turns.map((t, i) => (<li key={i}>{t}</li>))}
+              </ol>
+              <button type="button" data-testid="run-conversation" onClick={() => runConversation(scenario.turns!)} disabled={busy}>
+                {busy ? 'Running...' : 'Run conversation'}
+              </button>
+            </div>
+          )}
           <form onSubmit={sendChat} className="prompt-form">
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Enter a prompt" rows={5} disabled={busy} />
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={scenario?.turns ? 'Type a follow-up to continue the conversation…' : 'Enter a prompt'}
+              rows={5}
+              disabled={busy}
+            />
             <button type="submit" disabled={busy || !config || !prompt.trim()}>{busy ? 'Running...' : 'Send Prompt'}</button>
           </form>
           <ChatLog chat={chat} />

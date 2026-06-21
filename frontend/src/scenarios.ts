@@ -18,6 +18,7 @@ export type Scenario = {
   tools?: ToolPreset;          // tools: which functions to expose
   toolChoice?: 'auto' | string; // tools: 'auto' or a forced function name
   followUpToolResult?: string; // tools: synthetic tool result to feed back (multi-turn loop)
+  turns?: string[];            // chat: a scripted multi-turn conversation (context-memory demo)
 };
 
 // At least 5 interactive scenarios per capability so the selected model can be demoed thoroughly.
@@ -35,6 +36,12 @@ export const TEXT_SCENARIOS: Scenario[] = [
     prompt: 'Extract the person, company, and amount as JSON from:\n"Maria from Contoso approved a $4,500 budget for Q3."' },
   { id: 'rewrite', label: 'Rewrite', hint: 'Tone / style rewriting',
     prompt: 'Rewrite this email to be polite and professional:\n"send me the report now, you are late."' },
+  { id: 'conversation', label: 'Multi-turn chat', hint: 'Context memory across a 3-turn conversation',
+    turns: [
+      'My name is Alice and I have a golden retriever named Max.',
+      'What kind of pet do I have, and what is its name?',
+      'Remind me — what did I say my name was?',
+    ] },
 ];
 
 export const CODE_SCENARIOS: Scenario[] = [
@@ -48,6 +55,12 @@ export const CODE_SCENARIOS: Scenario[] = [
     prompt: 'Write pytest unit tests for a function add(a, b) that returns a + b. Cover positives, negatives, and zero.' },
   { id: 'translate', label: 'Port language', hint: 'Translate between languages',
     prompt: 'Translate this Python to idiomatic JavaScript:\n\ndef greet(name):\n    return f"Hello, {name}!"' },
+  { id: 'iterate', label: 'Iterative coding', hint: 'Refine code across a 3-turn conversation',
+    turns: [
+      'Write a Python function add(a, b) that returns their sum.',
+      'Now add type hints to it.',
+      'Now add a docstring and one usage example.',
+    ] },
 ];
 
 export const REASONING_SCENARIOS: Scenario[] = [
@@ -61,6 +74,12 @@ export const REASONING_SCENARIOS: Scenario[] = [
     prompt: 'Compare SQLite and PostgreSQL for a small single-user desktop app. Give 3 pros and 3 cons each, then recommend one.' },
   { id: 'estimate', label: 'Estimate', hint: 'Fermi estimation',
     prompt: 'Estimate how many gas stations there are in the United States. State your assumptions and show the math.' },
+  { id: 'followup', label: 'Follow-up reasoning', hint: 'Build on the previous answer across turns',
+    turns: [
+      'A shop sells apples at $2 each. How much do 5 apples cost?',
+      'And if I buy 12 apples instead?',
+      'Now apply a 10% discount to that 12-apple total. What is the final price?',
+    ] },
 ];
 
 export const VISION_SCENARIOS: Scenario[] = [
