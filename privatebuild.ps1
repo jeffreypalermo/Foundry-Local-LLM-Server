@@ -19,15 +19,21 @@ if (-not (Get-Command foundry -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "Setup: starting Foundry Local service..."
-$serviceOutput = & foundry service start 2>&1 | Out-String
-$urlMatch = [regex]::Match($serviceOutput, 'running on (http://[^\s/]+)')
-if (-not $urlMatch.Success) {
-    throw "Setup FAILED: Foundry Local service did not report a URL.`nOutput: $serviceOutput"
+& foundry server start 2>&1 | Out-Null
+$statusJson = & foundry server status -o json 2>&1 | Out-String
+$start = $statusJson.IndexOf('{'); $end = $statusJson.LastIndexOf('}')
+if ($start -lt 0 -or $end -le $start) {
+    throw "Setup FAILED: Foundry Local server did not report status JSON.`nOutput: $statusJson"
 }
-$foundryUrl = $urlMatch.Groups[1].Value.TrimEnd('/')
+$status = $statusJson.Substring($start, $end - $start + 1) | ConvertFrom-Json
+$foundryUrl = ($status.webUrls | Select-Object -First 1).TrimEnd('/')
+if (-not $foundryUrl) {
+    throw "Setup FAILED: Foundry Local server reported no webUrls.`nOutput: $statusJson"
+}
 Write-Host "Foundry Local running at $foundryUrl"
 
-# Ensure phi-4-mini GPU variant is loaded (download + load if needed)
+# Ensure phi-4-mini GPU variant is loaded (download + load if needed). The cross-platform CLI
+# auto-selects the best variant, so no --device/--ttl flags.
 Write-Host "Setup: checking phi-4-mini GPU model..."
 $modelsResponse = Invoke-RestMethod -Uri "$foundryUrl/v1/models" -TimeoutSec 10
 $gpuLoaded = $modelsResponse.data.id | Where-Object {
@@ -37,14 +43,14 @@ $gpuLoaded = $modelsResponse.data.id | Where-Object {
 
 if (-not $gpuLoaded) {
     Write-Host "phi-4-mini GPU model not loaded. Attempting to load..."
-    & foundry model load phi-4-mini --device GPU --ttl 1800
+    & foundry model load phi-4-mini
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Load failed (exit $LASTEXITCODE). Trying download first..."
-        & foundry model download phi-4-mini --device GPU
+        & foundry model download phi-4-mini
         if ($LASTEXITCODE -ne 0) {
             throw "Setup FAILED: could not download phi-4-mini GPU model."
         }
-        & foundry model load phi-4-mini --device GPU --ttl 1800
+        & foundry model load phi-4-mini
         if ($LASTEXITCODE -ne 0) {
             throw "Setup FAILED: could not load phi-4-mini GPU model."
         }

@@ -14,33 +14,60 @@
 
 The server defaults to `phi-4-mini` (`FoundryLocal:Model`).
 
+## Foundry Local version (cross-platform v1.2.x / CLI 0.10)
+
+This project targets the **cross-platform GA Foundry Local (v1.2.x line, CLI 0.10)** — not the
+older 0.8.x winget package. Install the CLI `.msix` from the GitHub release and remove the old
+winget package so `foundry` resolves to the new CLI:
+
+```powershell
+# from https://github.com/microsoft/Foundry-Local/releases (cli-preview-0.10.0)
+Add-AppxPackage .\foundry-0.10.0-win-x64-winml.msix
+Get-AppxPackage Microsoft.FoundryLocal | Remove-AppxPackage   # remove old 0.8.x
+foundry --version    # 0.10.0
+```
+
+The new CLI restructured commands: `foundry server start` / `foundry server status -o json`
+(was `service`), and `model load`/`download` auto-select the variant (the `--device`/`--ttl`
+flags were removed). The Server, test helper, and `privatebuild.ps1` all use the new commands.
+
 ## Run Foundry Local
 
 ```bash
-foundry model run phi-4-mini --port 5273
+foundry server start            # starts the daemon; the Server auto-discovers its URL
 ```
 
-The app is configured to use:
+The Server auto-discovers the daemon URL via `foundry server status` and loads the GPU variant
+of the selected model on demand. Override the endpoint/model in
+`FoundryLocalLlmServer.Server/appsettings*.json` or environment variables.
 
-- Foundry endpoint: `http://127.0.0.1:5273`
-- Model: `phi-4-mini`
+## Models & capabilities
 
-You can override in `FoundryLocalLlmServer.Server/appsettings*.json` or environment variables.
+This host targets an **NVIDIA GeForce RTX 5070 Ti (16 GB)**. Every GPU variant in the Foundry
+Local catalog fits in 16 GB VRAM, so the full GPU-compatible catalog is included.
+`FoundryLocal:AvailableModels` lists the curated selectable aliases. The proxy resolves each
+alias to its CUDA/GPU variant and pre-loads that exact variant (the daemon does not auto-load).
 
-## Models
+Verified working on v1.2.x: **text, code, reasoning, vision** (Qwen-VL / Qwen3.5 / Ministral via
+`/v1/chat/completions` image input), **tool calling** (Phi-4-mini family), and **speech-to-text**
+(Whisper). Whisper has no daemon HTTP route, so the Server bridges transcription to the
+`foundry transcribe` CLI.
 
-This host targets an **NVIDIA GeForce RTX 5070 Ti (16 GB)**. Every GPU variant in the
-Foundry Local catalog fits in 16 GB VRAM, so the full GPU-compatible catalog is included.
-`FoundryLocal:AvailableModels` lists the curated selectable aliases (chat, reasoning,
-coder, vision-language, and Whisper speech-to-text). Foundry's alias resolver prefers the
-CUDA/TensorRT-RTX GPU build of each model over NPU/CPU automatically.
+Endpoints:
 
-Model endpoints:
+- `GET /api/models` — `{ current, available[] }`; each model carries its capability flags
+  (`text`/`code`/`reasoning`/`vision`/`audio`/`tools`) for the SPA's per-model panels.
+- `POST /api/models/select` — `{ "model": "<alias>" }` switches the active model.
+- `GET /v1/models` — OpenAI-format list proxied live from Foundry.
+- `POST /v1/chat/completions` — chat (text + `image_url` vision + `tools`).
+- `POST /v1/audio/transcriptions` — OpenAI-style multipart speech-to-text (bridges to the CLI).
 
-- `GET /api/models` — `{ current, available[] }`, the selectable set and active model.
-- `POST /api/models/select` — `{ "model": "<alias>" }` switches the active model; Foundry
-  loads it lazily on the next chat request. Only aliases in `AvailableModels` are accepted.
-- `GET /v1/models` — OpenAI-format list proxied live from Foundry (what is loaded/cached).
+## Web UI
+
+The SPA shows a **model picker** (with capability badges) and renders a capability-specific test
+panel for the selected model — **Text chat**, **Vision** (image upload), **Tools**
+(`get_weather` demo), and **Speech-to-text** (audio upload) — so you can exercise the full
+capabilities of each model from the browser.
 
 Adding or removing selectable models is a config-only change to `AvailableModels`.
 
@@ -61,14 +88,19 @@ dotnet run --project ./FoundryLocalLlmServer.AppHost/FoundryLocalLlmServer.AppHo
 Point your OpenAI-compatible CLI/tooling to this app's server endpoint and model:
 
 - Base URL: `http://localhost:<server-port>/v1`
-- Model: `gemma4`
+- Model: `phi-4-mini` (or any alias from `GET /api/models`)
 
-For example, configure your tool with `base_url=http://localhost:5057/v1` and `model=gemma4` when the server is running on port `5057`.
+For example, configure your tool with `base_url=http://localhost:5057/v1` and `model=phi-4-mini` when the server is running on port `5057`.
 
 ## Tests
 
 ```bash
-dotnet test ./FoundryLocalLlmServer.sln
+dotnet test ./FoundryLocalLlmServer.sln          # stub-mode (no GPU) — CI-safe
+./privatebuild.ps1                               # full build incl. the live GPU matrix
 ```
 
-The OpenAI-compatibility integration tests run with `FoundryLocal:UseStubResponses=true` and do not require a GPU. Live Foundry/opencode/Playwright integration tests are skipped automatically when prerequisites are unavailable.
+The OpenAI-compatibility tests run with `FoundryLocal:UseStubResponses=true` and need no GPU.
+The **live capability matrix** (`FullCapabilityMatrixTests`, tagged `Category=GPU-Required`)
+exercises every model in `AvailableModels` against real Foundry inference — text/code/reasoning
+prompts, vision image description, tool calls, and Whisper transcription — and is run by
+`privatebuild.ps1`. CI filters out `Category=GPU-Required`.

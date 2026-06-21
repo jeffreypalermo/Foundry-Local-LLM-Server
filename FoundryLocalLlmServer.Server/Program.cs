@@ -29,54 +29,58 @@ string GetSelectedModel() { lock (_selectedModelLock) return _selectedModel; }
 // Serialize requests to Foundry — concurrent streaming requests crash the service
 var _foundryRequestGate = new SemaphoreSlim(1, 1);
 
-async Task<string?> DiscoverFoundryEndpointAsync()
+// Runs the `foundry` CLI (cross-platform v1.x / CLI 0.10+) and returns combined stdout+stderr.
+// Returns null if the CLI is unavailable or times out.
+static async Task<string?> RunFoundryAsync(string arguments, int timeoutSeconds)
 {
     try
     {
         using var proc = Process.Start(new ProcessStartInfo("foundry")
         {
-            Arguments = "service start",
+            Arguments = arguments,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         });
-        if (proc != null)
-        {
-            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
-            var stderrTask = proc.StandardError.ReadToEndAsync();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await proc.WaitForExitAsync(cts.Token);
-            var combined = await stdoutTask + await stderrTask;
-            var match = Regex.Match(combined, @"(?:running|started)\s+on\s+(http://[^\s/]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-                return match.Groups[1].Value.TrimEnd('/');
-        }
+        if (proc == null) return null;
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        await proc.WaitForExitAsync(cts.Token);
+        return await stdoutTask + await stderrTask;
     }
-    catch { /* Foundry CLI not available */ }
-    return null;
+    catch { return null; }
+}
+
+// Extracts the first JSON object from CLI output that may have leading log/spinner lines.
+static JsonNode? ParseFirstJson(string? text)
+{
+    if (string.IsNullOrWhiteSpace(text)) return null;
+    var start = text.IndexOf('{');
+    var end = text.LastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    try { return JsonNode.Parse(text[start..(end + 1)]); }
+    catch { return null; }
+}
+
+async Task<string?> DiscoverFoundryEndpointAsync()
+{
+    // New CLI: `foundry server start` boots the daemon; `foundry server status -o json` reports webUrls.
+    await RunFoundryAsync("server start", 60);
+    var statusJson = await RunFoundryAsync("server status -o json", 30);
+    var url = ParseFirstJson(statusJson)?["webUrls"]?.AsArray()?.FirstOrDefault()?.GetValue<string>();
+    return url?.TrimEnd('/');
 }
 
 async Task EnsureModelLoadedAsync(string modelAlias, ILogger logger)
 {
-    try
-    {
-        logger.LogInformation("Loading model {Model} on Foundry...", modelAlias);
-        using var proc = Process.Start(new ProcessStartInfo("foundry")
-        {
-            Arguments = $"model load {modelAlias} --device GPU --ttl 7200",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-        if (proc != null)
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            await proc.WaitForExitAsync(cts.Token);
-            var output = await proc.StandardOutput.ReadToEndAsync();
-            logger.LogInformation("Model load result: {Output}", output.Trim());
-        }
-    }
-    catch (Exception ex) { logger.LogWarning(ex, "Model load failed for {Model}", modelAlias); }
+    // New CLI auto-selects the best variant; the `--device`/`--ttl` flags were removed.
+    logger.LogInformation("Loading model {Model} on Foundry...", modelAlias);
+    var output = await RunFoundryAsync($"model load {modelAlias}", 180);
+    if (output != null)
+        logger.LogInformation("Model load result: {Output}", output.Trim());
+    else
+        logger.LogWarning("Model load produced no output for {Model}", modelAlias);
 }
 
 async Task<string> GetFoundryEndpointAsync(string configuredEndpoint, bool forceRediscovery = false)
@@ -150,11 +154,30 @@ app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
 
 // Selectable models for this server. The list is the configured AvailableModels (curated to the
 // GPU-compatible catalog for this host); falls back to the single configured Model when empty.
+// Each entry carries its capability set (text/code/reasoning/vision/audio/tools) so the SPA can
+// render a capability-specific test panel for the selected model.
 app.MapGet("/api/models", (IOptions<FoundryLocalOptions> options) =>
 {
-    var available = options.Value.AvailableModels is { Length: > 0 } list
+    var aliases = options.Value.AvailableModels is { Length: > 0 } list
         ? list
         : [options.Value.Model];
+
+    var available = aliases.Select(alias =>
+    {
+        var caps = ModelCapabilityCatalog.For(alias);
+        return new
+        {
+            id = alias,
+            capabilities = caps.Names(),
+            text = caps.Text,
+            code = caps.Code,
+            reasoning = caps.Reasoning,
+            vision = caps.Vision,
+            audio = caps.Audio,
+            tools = caps.Tools,
+        };
+    }).ToArray();
+
     return Results.Ok(new
     {
         current = GetSelectedModel(),
@@ -187,10 +210,91 @@ app.MapPost("/api/models/select", async (HttpContext context, IOptions<FoundryLo
     return Results.Ok(new { current = requested });
 });
 
+// OpenAI-compatible speech-to-text. Foundry Local exposes transcription only via the CLI
+// (`foundry transcribe`), not over the daemon's HTTP API, so this endpoint bridges multipart audio
+// uploads to the CLI and returns the OpenAI `{ "text": ... }` shape. Used by the SPA's audio panel.
+app.MapPost("/v1/audio/transcriptions", async (HttpContext context, IOptions<FoundryLocalOptions> options, ILogger<Program> logger, CancellationToken cancellationToken) =>
+{
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { error = "Expected multipart/form-data with a 'file' field." });
+
+    var form = await context.Request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    if (file is null || file.Length == 0)
+        return Results.BadRequest(new { error = "Missing audio 'file'." });
+
+    var model = form["model"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(model)) model = GetSelectedModel();
+
+    if (options.Value.UseStubResponses)
+        return Results.Json(new { text = $"[stub transcript for {file.FileName}]" });
+
+    // Persist the upload so the CLI can read it, preserving the extension Whisper expects.
+    var ext = Path.GetExtension(file.FileName);
+    if (string.IsNullOrWhiteSpace(ext)) ext = ".wav";
+    var tempPath = Path.Combine(Path.GetTempPath(), $"foundry-stt-{Guid.NewGuid():N}{ext}");
+    try
+    {
+        await using (var fs = File.Create(tempPath))
+            await file.CopyToAsync(fs, cancellationToken);
+
+        var output = await RunFoundryAsync($"transcribe -m {model} -f \"{tempPath}\" -o json", 240);
+        var text = ParseFirstJson(output)?["text"]?.GetValue<string>();
+        if (text is null)
+        {
+            logger.LogWarning("Transcription produced no text for {Model}. Raw: {Raw}", model, output?.Trim());
+            return Results.Problem(title: "Transcription failed", detail: "Foundry returned no transcript.", statusCode: 502);
+        }
+
+        return Results.Json(new { text = text.Trim(), model });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Transcription error for {Model}", model);
+        return Results.Problem(title: "Transcription error", detail: ex.Message, statusCode: 500);
+    }
+    finally
+    {
+        try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best-effort cleanup */ }
+    }
+});
+
 // Cache of alias → (resolvedId, maxTotalTokens) — cleared when /v1/models is refreshed.
 // maxTotalTokens = maxInputTokens + maxOutputTokens as reported by Foundry.
 // Foundry enforces this as the hard limit for the max_tokens parameter.
 var aliasCache = new ConcurrentDictionary<string, (string ResolvedId, int MaxTokens)>(StringComparer.OrdinalIgnoreCase);
+
+// Single-model VRAM discipline. The cross-platform daemon (CLI 0.10+) does NOT auto-load on request
+// (it rejects unloaded ids with a 400), and `foundry model load <alias>` auto-picks a non-GPU variant
+// for some models — so the proxy loads the exact resolved GPU id itself. It also UNLOADS the previously
+// loaded model first: keeping two large models resident on a 16 GB GPU OOM-crashes the daemon, so we
+// hold exactly one model at a time. State is process-static (see ModelLoadState) so the discipline
+// spans every host in the process — critical for the sequential integration matrix.
+async Task EnsureExclusiveLoadAsync(string resolvedId, ILogger logger, bool daemonRestarted = false)
+{
+    await ModelLoadState.Lock.WaitAsync();
+    try
+    {
+        // After a daemon restart nothing is resident; forget the stale bookkeeping.
+        if (daemonRestarted) ModelLoadState.CurrentLoadedId = null;
+
+        if (string.Equals(ModelLoadState.CurrentLoadedId, resolvedId, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!string.IsNullOrEmpty(ModelLoadState.CurrentLoadedId))
+        {
+            logger.LogInformation("Unloading {Prev} to free VRAM before loading {Next}", ModelLoadState.CurrentLoadedId, resolvedId);
+            await RunFoundryAsync($"model unload {ModelLoadState.CurrentLoadedId}", 60);
+        }
+
+        await EnsureModelLoadedAsync(resolvedId, logger);
+        ModelLoadState.CurrentLoadedId = resolvedId;
+    }
+    finally
+    {
+        ModelLoadState.Lock.Release();
+    }
+}
 
 // Cached models list with expiry — avoids hammering Foundry on every request
 FoundryModel[] cachedModels = [];
@@ -294,12 +398,35 @@ async Task<FoundryModel[]> GetFoundryModelsAsync(string endpoint, IHttpClientFac
     }
 }
 
+// Authoritative friendly-alias → resolved-id resolution via `foundry model info <alias> -o json`,
+// cached per alias. Needed for families whose resolved id is NOT an alias prefix — e.g.
+// "deepseek-r1-7b" → "deepseek-r1-distill-qwen-7b-cuda-gpu", "mistral-7b-v0.2" →
+// "mistralai-Mistral-7B-Instruct-v0-2-cuda-gpu", "whisper-tiny" → "openai-whisper-tiny-cuda-gpu".
+// We return the variant's displayName, which matches the id form the daemon's /v1/models reports.
+var _modelInfoCache = new ConcurrentDictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+async Task<string?> ResolveViaModelInfoAsync(string alias)
+{
+    if (_modelInfoCache.TryGetValue(alias, out var cachedId))
+        return cachedId;
+
+    var json = await RunFoundryAsync($"model info {alias} -o json", 30);
+    var model = ParseFirstJson(json)?["model"];
+    // Prefer displayName (no ":N" suffix → matches /v1/models ids); fall back to id.
+    var resolved = model?["displayName"]?.GetValue<string>() ?? model?["id"]?.GetValue<string>();
+    _modelInfoCache[alias] = resolved;
+    return resolved;
+}
+
 async Task<(string ResolvedId, int MaxTokens)> ResolveModelAsync(string requestedModel, string endpoint, IHttpClientFactory factory)
 {
     if (aliasCache.TryGetValue(requestedModel, out var cached))
         return cached;
 
     var foundryModels = await GetFoundryModelsAsync(endpoint, factory);
+
+    int CapFor(string id) => foundryModels
+        .FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase))?.MaxTotalTokens ?? 0;
 
     // If Foundry already knows this exact ID, use it as-is
     var exact = foundryModels.FirstOrDefault(m =>
@@ -315,10 +442,23 @@ async Task<(string ResolvedId, int MaxTokens)> ResolveModelAsync(string requeste
     var matches = foundryModels.Where(m => ModelIdMatchesAlias(m.Id, requestedModel)).ToArray();
     var gpuMatch = matches.FirstOrDefault(m => IsGpuVariant(m.Id));
     var match = gpuMatch ?? matches.FirstOrDefault();
-    var result = match != null
-        ? (match.Id, match.MaxTotalTokens)
-        : (requestedModel, 0); // fall back; 0 means no capping
+    if (match != null)
+    {
+        var entry = (match.Id, match.MaxTotalTokens);
+        aliasCache[requestedModel] = entry;
+        return entry;
+    }
 
+    // Heuristic found nothing — consult Foundry's own resolver (handles deepseek/mistral/whisper).
+    var mappedId = await ResolveViaModelInfoAsync(requestedModel);
+    if (!string.IsNullOrWhiteSpace(mappedId))
+    {
+        var entry = (mappedId!, CapFor(mappedId!));
+        aliasCache[requestedModel] = entry;
+        return entry;
+    }
+
+    var result = (requestedModel, 0); // fall back; 0 means no capping
     aliasCache[requestedModel] = result;
     return result;
 }
@@ -412,6 +552,10 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
                 logger.LogInformation("Resolved model: {Resolved} (cap={Cap})", resolvedModel, cap);
                 if (!string.Equals(requestedModel, resolvedModel, StringComparison.OrdinalIgnoreCase))
                     requestPayload["model"] = resolvedModel;
+
+                // The daemon needs the exact resolved id loaded before it will serve it.
+                if (!string.IsNullOrWhiteSpace(resolvedModel))
+                    await EnsureExclusiveLoadAsync(resolvedModel, logger);
             }
 
             // Cap max_tokens to the model's total context window to prevent OOM/400 errors
@@ -434,31 +578,31 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
             try
             {
                 // Try the request, and if Foundry is unreachable, re-discover and retry once
-                for (int attempt = 0; attempt < 2; attempt++)
+                const int maxAttempts = 4;
+                for (int attempt = 0; attempt < maxAttempts; attempt++)
                 {
-                    var endpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint, forceRediscovery: attempt > 0);
                     if (attempt > 0)
                     {
-                        // Clear model caches so alias resolution uses the new endpoint
+                        // The cross-platform daemon can drop out (crash + auto-restart) while cycling
+                        // large models. Back off, restart/re-discover it, and re-load the resolved GPU
+                        // variant before retrying so a transient outage doesn't surface as a failure.
+                        await Task.Delay(TimeSpan.FromSeconds(3 * attempt), cancellationToken);
                         aliasCache.Clear();
                         cachedModelsExpiry = DateTime.MinValue;
 
-                        // Ensure the model is loaded on the (possibly restarted) Foundry instance
-                        var modelToLoad = originalModelAlias ?? foundryOptions.Model;
-                        await EnsureModelLoadedAsync(modelToLoad, logger);
-
-                        // Re-resolve model alias against the new endpoint
+                        var rediscovered = await GetFoundryEndpointAsync(foundryOptions.Endpoint, forceRediscovery: true);
                         if (requestPayload?["model"] is JsonNode retryModelNode)
                         {
-                            var retryRequested = retryModelNode.GetValue<string>();
-                            var (retryResolved, retryCap) = await ResolveModelAsync(retryRequested, endpoint, httpClientFactory);
-                            if (!string.Equals(retryRequested, retryResolved, StringComparison.OrdinalIgnoreCase))
-                                requestPayload["model"] = retryResolved;
+                            var retryRequested = originalModelAlias ?? retryModelNode.GetValue<string>();
+                            var (retryResolved, _) = await ResolveModelAsync(retryRequested, rediscovered, httpClientFactory);
+                            requestPayload["model"] = retryResolved;
+                            await EnsureExclusiveLoadAsync(retryResolved, logger, daemonRestarted: true);
                             payloadJson = requestPayload?.ToJsonString() ?? "{}";
                         }
-
-                        logger.LogInformation("Retry with re-discovered endpoint: {Endpoint}", endpoint);
+                        logger.LogWarning("Retry {Attempt}/{Max} after daemon issue", attempt + 1, maxAttempts);
                     }
+
+                    var endpoint = await GetFoundryEndpointAsync(foundryOptions.Endpoint);
 
                     var targetUri = new Uri(new Uri(endpoint), "/v1/chat/completions");
                     logger.LogInformation("Proxying to {TargetUri} (stream={Stream}, attempt={Attempt})", targetUri, isStreaming, attempt);
@@ -497,12 +641,14 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
                             return Results.Empty;
                         }
                         
-                        // If streaming but failed, or non-streaming with error, fall back to Ollama
+                        // Non-success is often a transient "model not loaded" during a daemon
+                        // restart — retry (with reload) until the last attempt, then fall back.
                         if (!response.IsSuccessStatusCode)
                         {
-                            logger.LogWarning("Foundry returned error {StatusCode}, will try Ollama fallback", response.StatusCode);
+                            logger.LogWarning("Foundry returned {StatusCode} (attempt {Attempt}/{Max})", response.StatusCode, attempt + 1, maxAttempts);
+                            if (attempt < maxAttempts - 1) continue;
                             foundryFailed = true;
-                            break; // exit retry loop to try Ollama
+                            break; // exhausted retries — try Ollama / surface error
                         }
 
                         var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -517,9 +663,9 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
                         
                         return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
                     }
-                    catch (HttpRequestException) when (attempt == 0)
+                    catch (HttpRequestException) when (attempt < maxAttempts - 1)
                     {
-                        logger.LogWarning("Foundry unreachable at {Endpoint}, attempting re-discovery...", endpoint);
+                        logger.LogWarning("Foundry unreachable at {Endpoint}, will re-discover and retry...", endpoint);
                         continue; // retry with re-discovery
                     }
                 }

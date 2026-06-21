@@ -1,5 +1,50 @@
 # Decisions
 
+## 2026-06-20 (later)
+
+### Migrate to Foundry Local v1.2.x; Live Capability Matrix; UI Capability Harness
+
+**Date:** 2026-06-20
+**Author:** Claude (Opus 4.8)
+**Status:** Accepted
+**Requested by:** Jeffrey Palermo
+
+#### Context
+
+Two requests: (1) integration tests that exercise the **full capabilities** of **every** model
+with no skipping, and (2) a UI that, on model selection, shows a capability-specific panel to
+exercise that model (tools, vision, text, etc.). On the then-current Foundry Local **0.8.119**,
+vision models failed to load (onnxruntime-genai too old for VL `genai_config.json`) and Whisper
+had no invocation path — so "all capabilities" was not achievable. The user then directed us to
+the **cross-platform GA Foundry Local v1.2.x** line.
+
+#### Decision
+
+1. **Upgrade to cross-platform Foundry Local v1.2.x (CLI 0.10.0).** Installed via the GitHub
+   release `.msix` (`Microsoft.FoundryLocalCLI`), old winget `Microsoft.FoundryLocal` (0.8.x)
+   removed. This **unblocked vision** (VL models now load and answer image prompts) and **Whisper**
+   (`foundry transcribe` CLI produces transcripts). All capabilities now work on-device.
+2. **Adapt to the new CLI surface.** `service`→`server`; URL via `server status -o json`
+   `webUrls`; `model load/download` lost `--device/--ttl`. The daemon does not auto-load and
+   `model load <alias>` may pick a non-GPU variant, so the proxy resolves alias→**cuda/gpu id**
+   (via `/v1/models` heuristic, falling back to `model info -o json` for families like
+   deepseek/mistral/whisper) and pre-loads that exact id before forwarding.
+3. **Add `POST /v1/audio/transcriptions`** (OpenAI-shaped) that bridges multipart audio to the
+   `foundry transcribe` CLI, since the daemon exposes no HTTP audio route.
+4. **Live capability matrix** (`FullCapabilityMatrixTests`, `Category=GPU-Required`, run by
+   `privatebuild.ps1`): every `AvailableModels` entry loads on the GPU and processes a
+   capability-appropriate prompt — text/code/reasoning assertions, vision image description,
+   tool-call shape, and Whisper transcription (asserts the known clip transcribes). No `[Skip]`.
+5. **UI capability harness:** model picker (capability badges) + per-capability panels (Text,
+   Vision image upload, Tools, Speech-to-text upload). `/api/models` returns per-model capability
+   flags (`ModelCapabilities.cs`) to drive the panels. Playwright selectors preserved.
+
+#### Rationale
+
+The platform version was the gating constraint; v1.2.x removes it, so the honest, complete
+deliverable (real tests + real UI for all capabilities) became possible rather than documenting
+blockers.
+
 ## 2026-06-20
 
 ### Include All GPU-Compatible Foundry Local Models; MAI Stays Cloud-Only

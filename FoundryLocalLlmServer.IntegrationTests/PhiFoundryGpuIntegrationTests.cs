@@ -206,9 +206,14 @@ public class PhiFoundryGpuIntegrationTests
             if (chunk?["object"]?.GetValue<string>() == "chat.completion.chunk")
                 sawCompletionChunk = true;
 
-            var delta = chunk?["choices"]?[0]?["delta"]?["content"]?.GetValue<string>();
-            if (!string.IsNullOrEmpty(delta))
-                assembled.Append(delta);
+            // The final chunk carries an empty choices array (valid OpenAI behavior), so guard the
+            // index access rather than assuming choices[0] exists.
+            if (chunk?["choices"] is JsonArray choices && choices.Count > 0)
+            {
+                var delta = choices[0]?["delta"]?["content"]?.GetValue<string>();
+                if (!string.IsNullOrEmpty(delta))
+                    assembled.Append(delta);
+            }
         }
 
         Assert.True(sawCompletionChunk, "No OpenAI 'chat.completion.chunk' frames were found in the stream.");

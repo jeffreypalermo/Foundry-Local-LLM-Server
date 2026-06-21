@@ -28,7 +28,7 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
 
         var response = await client.PostAsJsonAsync("/v1/chat/completions", new
         {
-            model = "gemma4",
+            model = "phi-4-mini",
             messages = new[]
             {
                 new { role = "user", content = "summarize this test" },
@@ -56,7 +56,7 @@ public class OpenAiCompatibilityTests : IClassFixture<ServerFactory>
         };
 
         var sdkClient = new ChatClient(
-            "gemma4",
+            "phi-4-mini",
             new ApiKeyCredential("local-test-key"),
             options);
 
@@ -82,7 +82,7 @@ public sealed class ServerFactory : WebApplicationFactory<Program>
         {
             var config = new Dictionary<string, string?>
             {
-                ["FoundryLocal:Model"] = "gemma4",
+                ["FoundryLocal:Model"] = "phi-4-mini",
                 ["FoundryLocal:UseStubResponses"] = "true",
             };
 

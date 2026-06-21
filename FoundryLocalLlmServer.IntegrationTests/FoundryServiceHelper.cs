@@ -12,9 +12,6 @@ namespace FoundryLocalLlmServer.IntegrationTests;
 /// </summary>
 internal static class FoundryServiceHelper
 {
-    private static readonly Regex ServiceUrlPattern =
-        new(@"running on (http://[^\s/]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     private static string? _cachedUrl;
     private static readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -208,7 +205,7 @@ internal static class FoundryServiceHelper
         {
             var psi = new ProcessStartInfo("foundry")
             {
-                Arguments = $"model download {modelAlias} --device GPU",
+                Arguments = $"model download {modelAlias}",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -250,7 +247,7 @@ internal static class FoundryServiceHelper
         {
             var psi = new ProcessStartInfo("foundry")
             {
-                Arguments = $"model load {modelAlias} --device GPU --ttl 1800",
+                Arguments = $"model load {modelAlias}",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -268,18 +265,11 @@ internal static class FoundryServiceHelper
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
 
-            if (process.ExitCode != 0)
-                return false;
-
-            // Verify the GPU model appears in /v1/models
-            for (int i = 0; i < 10; i++)
-            {
-                if (await IsGpuModelAvailableAsync(modelAlias))
-                    return true;
-                await Task.Delay(2000);
-            }
-
-            return await IsModelAvailableAsync(modelAlias);
+            // Trust the CLI exit code. The /v1/models verification can't be used here: families whose
+            // resolved id isn't an alias prefix (deepseek-r1-* → DeepSeek-R1-Distill-Qwen-*, mistral-7b-v0.2
+            // → mistralai-Mistral-7B-*, whisper-* → openai-whisper-*) never satisfy the prefix matcher
+            // even when correctly loaded. `foundry model load` exiting 0 means the model is loaded.
+            return process.ExitCode == 0;
         }
         catch (OperationCanceledException)
         {
@@ -398,36 +388,42 @@ internal static class FoundryServiceHelper
 
    private static async Task<string?> DiscoverUrlAsync()
    {
+       // Cross-platform CLI (v1.x / 0.10+): `foundry server start` boots the daemon and
+       // `foundry server status -o json` reports its webUrls.
+       await RunFoundryAsync("server start", 60);
+       var statusJson = await RunFoundryAsync("server status -o json", 30);
+       if (statusJson == null) return null;
+
        try
        {
-           var psi = new ProcessStartInfo("foundry")
+           var start = statusJson.IndexOf('{');
+           var end = statusJson.LastIndexOf('}');
+           if (start < 0 || end <= start) return null;
+           var node = System.Text.Json.Nodes.JsonNode.Parse(statusJson[start..(end + 1)]);
+           var url = node?["webUrls"]?.AsArray()?.FirstOrDefault()?.GetValue<string>();
+           return url?.TrimEnd('/');
+       }
+       catch { return null; }
+   }
+
+   private static async Task<string?> RunFoundryAsync(string arguments, int timeoutSeconds)
+   {
+       try
+       {
+           using var process = Process.Start(new ProcessStartInfo("foundry")
            {
-               Arguments = "service start",
+               Arguments = arguments,
                UseShellExecute = false,
                RedirectStandardOutput = true,
                RedirectStandardError = true,
-           };
-
-           using var process = Process.Start(psi)
-               ?? throw new InvalidOperationException("Failed to start foundry process.");
-
-           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
+           });
+           if (process == null) return null;
            var stdoutTask = process.StandardOutput.ReadToEndAsync();
            var stderrTask = process.StandardError.ReadToEndAsync();
-
+           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
            await process.WaitForExitAsync(cts.Token);
-
-           var combined = (await stdoutTask) + (await stderrTask);
-           var match = ServiceUrlPattern.Match(combined);
-           if (!match.Success)
-               return null;
-
-           return match.Groups[1].Value.TrimEnd('/');
+           return (await stdoutTask) + (await stderrTask);
        }
-       catch
-       {
-           return null;
-       }
+       catch { return null; }
    }
 }
