@@ -347,7 +347,7 @@ function App() {
         <section className="panel" aria-label="Text chat">
           <form onSubmit={sendChat} className="prompt-form">
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Enter a prompt" rows={5} disabled={busy} />
-            <button type="submit" disabled={busy || !config}>{busy ? 'Running...' : 'Send Prompt'}</button>
+            <button type="submit" disabled={busy || !config || !prompt.trim()}>{busy ? 'Running...' : 'Send Prompt'}</button>
           </form>
           <ChatLog chat={chat} />
         </section>
@@ -359,7 +359,7 @@ function App() {
             <input type="file" accept="image/*" onChange={onPickImage} disabled={busy} aria-label="Image" />
             {imageDataUrl && <img className="preview" src={imageDataUrl} alt="selected" />}
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask about the image" rows={3} disabled={busy} />
-            <button type="submit" disabled={busy || !imageDataUrl}>{busy ? 'Running...' : 'Describe Image'}</button>
+            <button type="submit" disabled={busy || !imageDataUrl || !prompt.trim()}>{busy ? 'Running...' : 'Describe Image'}</button>
           </form>
           <ChatLog chat={chat} />
         </section>
@@ -370,7 +370,7 @@ function App() {
           <p className="hint">Tools available: <code>get_weather(city)</code>, <code>calculate(expression)</code>. The model may answer in text or emit tool calls.</p>
           <form onSubmit={sendTools} className="prompt-form">
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. What's the weather in Paris?" rows={3} disabled={busy} />
-            <button type="submit" disabled={busy}>{busy ? 'Running...' : 'Send with Tools'}</button>
+            <button type="submit" disabled={busy || !prompt.trim()}>{busy ? 'Running...' : 'Send with Tools'}</button>
           </form>
           <ChatLog chat={chat} />
         </section>

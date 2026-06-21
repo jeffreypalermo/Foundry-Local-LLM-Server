@@ -87,6 +87,15 @@ test.describe('Scenario chips — structure', () => {
     await expect(page.locator('textarea')).toHaveValue(/multiplied|calculate|\d/i);
   });
 
+  test('Send Prompt is disabled when the prompt is empty', async ({ page }) => {
+    await load(page);
+    await selectModel(page, 'phi-4-mini');
+    await page.locator('textarea').fill('');
+    await expect(page.locator('button:has-text("Send Prompt")')).toBeDisabled();
+    await page.locator('textarea').fill('hello');
+    await expect(page.locator('button:has-text("Send Prompt")')).toBeEnabled();
+  });
+
   test('audio model exposes 5 audio scenarios; chips set the clip/language hint', async ({ page }) => {
     await load(page);
     await selectModel(page, 'whisper-base'); // audio-only → audio panel is default
