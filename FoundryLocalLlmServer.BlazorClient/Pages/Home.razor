@@ -1,0 +1,391 @@
+@page "/"
+@using System.Net.Http.Json
+@using System.Net.Http.Headers
+@using Microsoft.AspNetCore.Components.Forms
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<main class="app-shell">
+    <h1>Foundry Local OpenAI Server <span class="client-tag">Blazor WASM client</span></h1>
+
+    <div class="controls">
+        <p class="config-line">Model: <strong>@(config?.Model ?? selected ?? "loading...")</strong></p>
+        <label class="picker">
+            Switch model:
+            <select value="@selected" @onchange="OnSelectModel" disabled="@(busy || models.Count == 0)" aria-label="Model">
+                @foreach (var m in models)
+                {
+                    <option value="@m.Id">@m.Id — @string.Join(", ", m.Capabilities)</option>
+                }
+            </select>
+        </label>
+        <p class="config-line">Foundry endpoint: <code>@(config?.Endpoint ?? "loading...")</code></p>
+        @if (Current is not null)
+        {
+            <p class="config-line caps">
+                Capabilities:
+                @foreach (var c in Current.Capabilities)
+                {
+                    <span class="cap-badge">@c</span>
+                }
+            </p>
+        }
+    </div>
+
+    @if (AvailableModes.Count > 1)
+    {
+        <nav class="mode-tabs" aria-label="Capability">
+            @foreach (var m in AvailableModes)
+            {
+                <button type="button" class="mode-tab @(m == mode ? "active" : "")" @onclick="() => SetMode(m)" disabled="@busy">@ModeLabel(m)</button>
+            }
+        </nav>
+    }
+
+    <section class="scenarios" aria-label="Demo scenarios">
+        <p class="scenarios-title">Demo scenarios — @Kind:</p>
+        <div class="scenario-chips">
+            @foreach (var s in scenarioList)
+            {
+                <button type="button" class="scenario-chip @(scenario?.Id == s.Id ? "active" : "")" @onclick="() => ApplyScenario(s)" disabled="@busy" title="@s.Hint">@s.Label</button>
+            }
+        </div>
+        @if (scenario is not null)
+        {
+            <p class="scenario-hint">@scenario.Hint</p>
+        }
+    </section>
+
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+
+    @if (mode == "chat")
+    {
+        <section class="panel" aria-label="Text chat">
+            @if (scenario?.Turns is { Length: > 0 } turns)
+            {
+                <div class="conversation-runner">
+                    <p class="hint">Scripted @turns.Length-turn conversation (demonstrates context memory):</p>
+                    <ol class="turn-list">
+                        @foreach (var t in turns) { <li>@t</li> }
+                    </ol>
+                    <button type="button" @onclick="() => RunConversation(turns)" disabled="@busy">@(busy ? "Running..." : "Run conversation")</button>
+                </div>
+            }
+            <form @onsubmit="SendChat" class="prompt-form">
+                <textarea value="@prompt" @oninput="e => prompt = e.Value?.ToString() ?? string.Empty" placeholder="@(scenario?.Turns is { Length: > 0 } ? "Type a follow-up to continue the conversation…" : "Enter a prompt")" rows="5" disabled="@busy"></textarea>
+                <button type="submit" disabled="@(busy || config is null || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : "Send Prompt")</button>
+            </form>
+            <ChatLog Turns="chat" />
+        </section>
+    }
+    else if (mode == "vision")
+    {
+        <section class="panel" aria-label="Vision">
+            <form @onsubmit="SendVision" class="prompt-form">
+                <InputFile OnChange="OnPickImage" accept="image/*" disabled="@busy" aria-label="Image" />
+                @if (imageDataUrl is not null)
+                {
+                    <img class="preview" src="@imageDataUrl" alt="selected" />
+                }
+                <textarea value="@prompt" @oninput="e => prompt = e.Value?.ToString() ?? string.Empty" placeholder="Ask about the image" rows="3" disabled="@busy"></textarea>
+                <button type="submit" disabled="@(busy || imageDataUrl is null || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : "Describe Image")</button>
+            </form>
+            <ChatLog Turns="chat" />
+        </section>
+    }
+    else if (mode == "tools")
+    {
+        <section class="panel" aria-label="Tools">
+            <p class="hint">Tools available: <code>get_weather(city)</code>, <code>calculate(expression)</code>. The model may answer in text or emit tool calls.</p>
+            <form @onsubmit="SendTools" class="prompt-form">
+                <textarea value="@prompt" @oninput="e => prompt = e.Value?.ToString() ?? string.Empty" placeholder="e.g. What's the weather in Paris?" rows="3" disabled="@busy"></textarea>
+                <button type="submit" disabled="@(busy || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : "Send with Tools")</button>
+            </form>
+            <ChatLog Turns="chat" />
+        </section>
+    }
+    else if (mode == "audio")
+    {
+        <section class="panel" aria-label="Speech-to-text">
+            <form @onsubmit="SendAudio" class="prompt-form">
+                <p class="hint">
+                    @(uploadedAudioName is not null ? $"File: {uploadedAudioName}" : audioSampleUrl is not null ? $"Built-in clip: {audioSampleUrl}" : "Choose a built-in clip or upload audio.")
+                    @(audioLanguage is not null ? $" · language={audioLanguage}" : "")
+                </p>
+                <InputFile OnChange="OnPickAudio" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg" disabled="@busy" aria-label="Audio file" />
+                <button type="submit" disabled="@(busy || (uploadedAudio is null && audioSampleUrl is null))">@(busy ? "Transcribing..." : "Transcribe")</button>
+            </form>
+            @if (transcript is not null)
+            {
+                <article class="message assistant">
+                    <h2>Transcript</h2>
+                    <p>@transcript</p>
+                </article>
+            }
+        </section>
+    }
+</main>
+
+@code {
+    FoundryConfig? config;
+    List<ModelInfo> models = new();
+    string? selected;
+    string mode = "chat";
+    Scenario? scenario;
+    string prompt = "";
+    List<ChatTurn> chat = new();
+    string? imageDataUrl;
+    string? audioSampleUrl;
+    string? audioLanguage;
+    byte[]? uploadedAudio;
+    string? uploadedAudioName;
+    string? transcript;
+    bool busy;
+    string? error;
+
+    ModelInfo? Current => models.FirstOrDefault(m => m.Id == selected);
+    List<string> AvailableModes => ModesFor(Current);
+    string Kind => KindFor(mode, Current);
+    Scenario[] scenarioList => Scenarios.For(Kind);
+
+    static List<string> ModesFor(ModelInfo? m)
+    {
+        if (m is null) return new() { "chat" };
+        var list = new List<string>();
+        if (m.Text) list.Add("chat");
+        if (m.Vision) list.Add("vision");
+        if (m.Tools) list.Add("tools");
+        if (m.Audio) list.Add("audio");
+        return list.Count > 0 ? list : new() { "chat" };
+    }
+
+    static string KindFor(string mode, ModelInfo? m) => mode switch
+    {
+        "vision" => "vision",
+        "tools" => "tools",
+        "audio" => "audio",
+        _ => m?.Code == true ? "code" : m?.Reasoning == true ? "reasoning" : "text",
+    };
+
+    static string ModeLabel(string m) => m switch
+    {
+        "chat" => "Text chat", "vision" => "Vision", "tools" => "Tools", "audio" => "Speech-to-text", _ => m,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            config = await Http.GetFromJsonAsync<FoundryConfig>("/api/foundry");
+            var list = await Http.GetFromJsonAsync<ModelsResponse>("/api/models");
+            models = (list?.Available ?? []).ToList();
+            selected = list?.Current;
+            ApplyScenario(scenarioList.FirstOrDefault());
+        }
+        catch (Exception ex) { error = ex.Message; }
+    }
+
+    void ApplyScenario(Scenario? s)
+    {
+        if (s is null) return;
+        scenario = s;
+        chat = new();
+        transcript = null;
+        error = null;
+        if (s.Prompt is not null) prompt = s.Prompt;
+        else if (s.Turns is { Length: > 0 }) prompt = "";
+        imageDataUrl = s.Image;
+        audioSampleUrl = s.AudioUrl;
+        audioLanguage = s.Language;
+        uploadedAudio = null;
+        uploadedAudioName = null;
+    }
+
+    async Task OnSelectModel(ChangeEventArgs e)
+    {
+        selected = e.Value?.ToString();
+        chat = new();
+        transcript = null;
+        error = null;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("/api/models/select", new { model = selected });
+            if (!resp.IsSuccessStatusCode) throw new Exception($"Could not select model ({(int)resp.StatusCode})");
+            if (config is not null) config.Model = selected ?? config.Model;
+        }
+        catch (Exception ex) { error = ex.Message; }
+        if (!AvailableModes.Contains(mode)) mode = AvailableModes[0];
+        ApplyScenario(scenarioList.FirstOrDefault());
+    }
+
+    void SetMode(string m)
+    {
+        mode = m;
+        ApplyScenario(scenarioList.FirstOrDefault());
+    }
+
+    async Task<ChatCompletion?> PostChat(IEnumerable<object> messages, object? extra = null)
+    {
+        var body = new Dictionary<string, object?> { ["model"] = selected, ["messages"] = messages };
+        if (extra is not null)
+            foreach (var p in extra.GetType().GetProperties()) body[p.Name] = p.GetValue(extra);
+        var resp = await Http.PostAsJsonAsync("/v1/chat/completions", body);
+        if (!resp.IsSuccessStatusCode) throw new Exception(await ReadError(resp));
+        return await resp.Content.ReadFromJsonAsync<ChatCompletion>();
+    }
+
+    async Task SendChat()
+    {
+        if (string.IsNullOrWhiteSpace(prompt) || busy) return;
+        busy = true; error = null;
+        chat.Add(new ChatTurn { Role = "user", Content = prompt.Trim() });
+        try
+        {
+            var payload = await PostChat(chat.Select(t => new { role = t.Role, content = t.Content }));
+            chat.Add(new ChatTurn { Role = "assistant", Content = ContentOf(payload) });
+            prompt = "";
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    async Task RunConversation(string[] turns)
+    {
+        if (busy) return;
+        busy = true; error = null;
+        chat = new();
+        try
+        {
+            foreach (var turn in turns)
+            {
+                chat.Add(new ChatTurn { Role = "user", Content = turn });
+                StateHasChanged();
+                var payload = await PostChat(chat.Select(t => new { role = t.Role, content = t.Content }));
+                chat.Add(new ChatTurn { Role = "assistant", Content = ContentOf(payload) });
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    async Task OnPickImage(InputFileChangeEventArgs e)
+    {
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(20 * 1024 * 1024).CopyToAsync(ms);
+        imageDataUrl = $"data:{e.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    async Task SendVision()
+    {
+        if (imageDataUrl is null || string.IsNullOrWhiteSpace(prompt) || busy) return;
+        busy = true; error = null;
+        chat.Add(new ChatTurn { Role = "user", Content = prompt.Trim() });
+        try
+        {
+            var content = new object[]
+            {
+                new { type = "text", text = prompt.Trim() },
+                new { type = "image_url", image_url = new { url = imageDataUrl } },
+            };
+            var payload = await PostChat(new[] { new { role = "user", content } });
+            chat.Add(new ChatTurn { Role = "assistant", Content = ContentOf(payload) });
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    async Task SendTools()
+    {
+        if (string.IsNullOrWhiteSpace(prompt) || busy || scenario is null) return;
+        busy = true; error = null;
+        var user = new ChatTurn { Role = "user", Content = prompt.Trim() };
+        chat = new() { user };
+        try
+        {
+            var tools = ToolsFor(scenario.Tools ?? "weather");
+            object toolChoice = scenario.ToolChoice is null or "auto" ? "auto" : new { type = "function", function = new { name = scenario.ToolChoice } };
+            var first = await PostChat(new[] { new { role = user.Role, content = user.Content } }, new { tools, tool_choice = toolChoice });
+            var msg = first?.Choices?.FirstOrDefault()?.Message;
+            var calls = msg?.ToolCalls ?? new();
+            if (calls.Count > 0)
+            {
+                var callLines = string.Join("\n", calls.Select(c => $"🛠 {c.Function?.Name}({c.Function?.Arguments})"));
+                if (scenario.FollowUpToolResult is not null)
+                {
+                    var assistantMsg = new { role = "assistant", content = msg?.Content ?? "", tool_calls = calls };
+                    var toolMsgs = calls.Select(c => new { role = "tool", tool_call_id = c.Id ?? c.Function?.Name ?? "call_0", content = scenario.FollowUpToolResult });
+                    var second = await PostChat(new object[] { new { role = user.Role, content = user.Content }, assistantMsg }.Concat(toolMsgs), new { tools });
+                    chat.Add(new ChatTurn { Role = "assistant", Content = $"{callLines}\n↩ tool result: {scenario.FollowUpToolResult}\n\n{ContentOf(second)}" });
+                }
+                else { chat.Add(new ChatTurn { Role = "assistant", Content = callLines }); }
+            }
+            else { chat.Add(new ChatTurn { Role = "assistant", Content = msg?.Content ?? "No content returned." }); }
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    async Task OnPickAudio(InputFileChangeEventArgs e)
+    {
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(50 * 1024 * 1024).CopyToAsync(ms);
+        uploadedAudio = ms.ToArray();
+        uploadedAudioName = e.File.Name;
+    }
+
+    async Task SendAudio()
+    {
+        if (busy || (uploadedAudio is null && audioSampleUrl is null)) return;
+        busy = true; error = null; transcript = null;
+        try
+        {
+            byte[] bytes;
+            string filename;
+            if (uploadedAudio is not null) { bytes = uploadedAudio; filename = uploadedAudioName ?? "audio.wav"; }
+            else
+            {
+                using var assetClient = new HttpClient { BaseAddress = new Uri(Nav.BaseUri) };
+                bytes = await assetClient.GetByteArrayAsync(audioSampleUrl);
+                filename = audioSampleUrl!;
+            }
+            using var form = new MultipartFormDataContent { { new StringContent(selected ?? ""), "model" } };
+            var fileContent = new ByteArrayContent(bytes);
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+            form.Add(fileContent, "file", filename);
+            if (audioLanguage is not null) form.Add(new StringContent(audioLanguage), "language");
+            var resp = await Http.PostAsync("/v1/audio/transcriptions", form);
+            if (!resp.IsSuccessStatusCode) throw new Exception(await ReadError(resp));
+            var payload = await resp.Content.ReadFromJsonAsync<TranscriptionResponse>();
+            transcript = payload?.Text ?? "(empty transcript)";
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    static object[] ToolsFor(string preset)
+    {
+        object weather = new { type = "function", function = new { name = "get_weather", description = "Get the current weather for a city", parameters = new { type = "object", properties = new { city = new { type = "string", description = "City name" } }, required = new[] { "city" } } } };
+        object calc = new { type = "function", function = new { name = "calculate", description = "Evaluate a math expression", parameters = new { type = "object", properties = new { expression = new { type = "string", description = "A math expression" } }, required = new[] { "expression" } } } };
+        return preset switch { "weather" => new[] { weather }, "calculate" => new[] { calc }, _ => new[] { weather, calc } };
+    }
+
+    static string ContentOf(ChatCompletion? p) => p?.Choices?.FirstOrDefault()?.Message?.Content ?? "No completion text returned.";
+
+    static async Task<string> ReadError(HttpResponseMessage resp)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err) && err.TryGetProperty("message", out var m)) return m.GetString() ?? $"Request failed ({(int)resp.StatusCode})";
+            if (root.TryGetProperty("detail", out var d)) return d.GetString() ?? $"Request failed ({(int)resp.StatusCode})";
+            if (root.TryGetProperty("title", out var t)) return t.GetString() ?? $"Request failed ({(int)resp.StatusCode})";
+        }
+        catch { }
+        return $"Request failed ({(int)resp.StatusCode})";
+    }
+}

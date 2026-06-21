@@ -232,3 +232,18 @@ written to `docs/demo-captures/`. The C# `tools/DemoDocBuilder` compiles `docs/D
   all of at full length. Their longest scenarios were captured with the server's `MaxResponseTokens`
   temporarily set to 512 (shorter but complete demonstrations); the server was restored to 2048 after.
 - See `docs/DEMO.md` for the full per-model walkthrough with embedded screenshots.
+
+---
+
+## 10. Multi-client proof — Blazor WASM client
+
+Built a second client app (`FoundryLocalLlmServer.BlazorClient`, Blazor WebAssembly) that mirrors the
+React SPA feature-for-feature (model picker, capability tabs, all scenario chips incl. multi-turn,
+vision/tools/audio panels). It points at the **same** Foundry Local proxy server (`:5537`) the React
+app uses; the Server now enables CORS so the cross-origin browser client can call it.
+
+- Server CORS verified: `OPTIONS /api/models` with a foreign `Origin` → `Access-Control-Allow-Origin: *`.
+- `frontend/tests/blazor-client.spec.ts` (Playwright against `:5180`) — **4/4 pass**:
+  catalog loads cross-origin from the shared server; text chat round-trips; multi-turn conversation
+  retains context (recalls the name/pet); speech-to-text returns the transcript.
+- Confirms **two distinct client apps (React + Blazor) against one Foundry Local server process**.

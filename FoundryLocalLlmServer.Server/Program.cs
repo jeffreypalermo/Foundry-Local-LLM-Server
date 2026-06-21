@@ -12,6 +12,10 @@ builder.AddServiceDefaults();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.AddHttpClient();
+// Allow browser clients served from other origins (e.g. the Blazor WASM client on its own port, or
+// the Vite dev server) to call the API directly — proving multi-client access to one server process.
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()
+    .WithExposedHeaders("X-Context-Dropped-Messages", "X-Context-Max-Tokens", "X-Context-Input-Tokens")));
 builder.Services.Configure<FoundryLocalOptions>(builder.Configuration.GetSection(FoundryLocalOptions.SectionName));
 builder.Services.Configure<OllamaFallbackOptions>(builder.Configuration.GetSection(OllamaFallbackOptions.SectionName));
 
@@ -136,6 +140,7 @@ if (!builder.Configuration.GetValue<bool>("FoundryLocal:UseStubResponses"))
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseCors();
 
 if (app.Environment.IsDevelopment())
 {

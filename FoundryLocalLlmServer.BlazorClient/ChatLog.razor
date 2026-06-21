@@ -1,0 +1,14 @@
+@* Transcript renderer — mirrors the React ChatLog (article.message.user/assistant > p). *@
+<section class="chat-log" aria-label="Chat transcript">
+    @foreach (var entry in Turns)
+    {
+        <article class="message @entry.Role">
+            <h2>@(entry.Role == "user" ? "User" : "Assistant")</h2>
+            <p>@entry.Content</p>
+        </article>
+    }
+</section>
+
+@code {
+    [Parameter] public List<ChatTurn> Turns { get; set; } = new();
+}

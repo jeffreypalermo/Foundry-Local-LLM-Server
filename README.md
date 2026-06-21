@@ -5,10 +5,30 @@
 ## Solution layout
 
 - `FoundryLocalLlmServer.AppHost` - Aspire orchestrator (Visual Studio/AppHost format)
-- `FoundryLocalLlmServer.Server` - ASP.NET Core OpenAI-format endpoint + SPA hosting
-- `frontend` - React SPA
+- `FoundryLocalLlmServer.Server` - ASP.NET Core OpenAI-format endpoint + SPA hosting (CORS enabled)
+- `frontend` - React/TypeScript SPA (Vite)
+- `FoundryLocalLlmServer.BlazorClient` - Blazor WebAssembly client (mirrors the React SPA)
+- `tools/DemoDocBuilder` - C# tool that compiles `docs/DEMO.md` from the Playwright demo captures
 - `FoundryLocalLlmServer.UnitTests` - unit tests
 - `FoundryLocalLlmServer.IntegrationTests` - integration tests (including Microsoft.Extensions.AI chat abstraction)
+
+## Two clients, one server (multi-client proof)
+
+Both the **React SPA** and the **Blazor WebAssembly client** are independent client apps that talk to the
+*same* Foundry Local proxy server process — proving multi-client compatibility against a single
+Foundry Local daemon. The Server enables CORS so browser clients on other origins can call it.
+
+```bash
+foundry server start                                                   # 1. the one daemon
+dotnet run --project ./FoundryLocalLlmServer.Server   # 2. the one server (:5537)
+# 3a. React client:
+cd frontend && set SERVER_HTTP=http://localhost:5537&& npm run dev      # http://localhost:5173
+# 3b. Blazor client (same server):
+dotnet run --project ./FoundryLocalLlmServer.BlazorClient --urls http://localhost:5180
+```
+
+Open both `:5173` and `:5180` — identical demo harness, one backend. The Blazor client's server base
+URL is set in its `Program.cs` (`http://localhost:5537`).
 
 ## Foundry Local default model
 
