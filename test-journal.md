@@ -174,3 +174,43 @@ Re-ran the strict build + non-matrix test classes in **Release**:
 tools, speech-to-text), zero skips, zero failures; the full app verified end-to-end through the
 browser and the API.** Daemon stability under all-model cycling was solved via single-model VRAM
 discipline + a hardened proxy retry.
+
+---
+
+## 7. Per-model demo harness (≥5 scenarios per capability)
+
+Each capability panel now offers scenario chips (inspired by the Microsoft Foundry Local C# samples:
+chat-assistant, document-summarizer, tool-calling, voice-to-text, vision):
+
+| Capability | Scenarios |
+|---|---|
+| Text (6) | Q&A, summarize, translate, classify, extract-JSON, rewrite |
+| Code (5) | generate, explain, find-bug, write-tests, port-language |
+| Reasoning (5) | word-problem, logic, plan, compare, estimate |
+| Vision (6) | describe, OCR, shape/color, count, visual-Q&A, upload |
+| Tools (5) | get_weather, calculate, two-tools, forced tool_choice, full tool loop |
+| Audio (5) | pangram clip, numbers clip, two language-hint clips, upload |
+
+Full-system Playwright suite `frontend/tests/demo-scenarios.spec.ts`:
+- **Structure (7):** chips render per capability; chips set prompt/preview/clip; empty-input disables Send.
+- **Behavior (11, live):** representative scenario per capability + OCR + upload + multi-turn tool loop
+  + model-switch-clears-conversation, all run end-to-end against real inference.
+
+## 8. Exploratory testing — bug → failing test → fix → pass
+
+Sustained creative exploration of the running app (UI + API). Each bug was first captured by a test
+that failed, then fixed until it passed.
+
+| # | Bug found | Exposing test | Fix |
+|---|---|---|---|
+| 1 | `ApplyContextBounds` was dead code — no prompt-trim / max_tokens cap (VRAM-OOM risk) | `ContextBoundsTests` (2) | Wired into handler + `X-Context-*` headers |
+| 2 | Malformed JSON body → **500** | `ExploratoryApiTests.MalformedJsonBody…` | Catch parse error → **400** |
+| 3 | Switching same-kind models left the previous model's transcript on screen | demo-scenarios "switching models clears…" | `onSelectModel` clears conversation |
+| 4 | `/api/models/select` malformed JSON → **500** | `ExploratoryApiTests.SelectModel_MalformedJson…` | Catch parse error → **400** |
+| 5 | Non-array `messages` → **500** (AsArray threw) | `ExploratoryApiTests.…MessagesNotArray…` | Validate up front → **400** |
+| 6 | Send buttons clickable on empty input (silent no-op) | demo-scenarios "Send Prompt is disabled…" | Disable when prompt empty |
+
+Probes that found **no** bug (kept as coverage / verified good behavior): multi-turn `role:tool`
+loop (daemon accepts it); vision model on plain-text chat; **live** context-trimming (60-msg
+conversation → 50 dropped, max_tokens→2048, input→~7.5k); non-audio upload → clean **502**;
+missing audio file → **400**; capability classification correct for all 41 models.

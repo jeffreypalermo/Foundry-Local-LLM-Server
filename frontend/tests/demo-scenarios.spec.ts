@@ -185,6 +185,17 @@ test.describe('Scenario behavior — live', () => {
     await expect(page.locator('p.error')).toHaveCount(0);
   });
 
+  test('tools: forced tool_choice', async ({ page }) => {
+    test.setTimeout(LONG);
+    await load(page);
+    await selectModel(page, 'phi-4-mini');
+    await switchTab(page, 'Tools');
+    await page.getByTestId('scenario-forced').click();
+    await page.locator('button:has-text("Send with Tools")').click();
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    await expect(page.locator('p.error')).toHaveCount(0);
+  });
+
   test('tools: calculator', async ({ page }) => {
     test.setTimeout(LONG);
     await load(page);
