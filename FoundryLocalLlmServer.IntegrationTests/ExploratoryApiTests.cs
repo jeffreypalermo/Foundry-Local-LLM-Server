@@ -24,4 +24,27 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    // Exploratory: /api/models/select with a malformed body must be a 400, not a 500.
+    [Fact]
+    public async Task SelectModel_MalformedJson_Returns400_Not500()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{ nope ", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/models/select", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Exploratory: a non-array "messages" is invalid input; the proxy must reject it cleanly (400),
+    // not throw (AsArray() on a JsonValue) and surface a 500.
+    [Fact]
+    public async Task ChatCompletions_MessagesNotArray_Returns400_Not500()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{\"model\":\"phi-4-mini\",\"messages\":\"hello\"}", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

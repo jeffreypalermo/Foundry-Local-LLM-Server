@@ -190,7 +190,15 @@ app.MapGet("/api/models", (IOptions<FoundryLocalOptions> options) =>
 // next chat request. No code change is needed to grow the selectable set, only AvailableModels.
 app.MapPost("/api/models/select", async (HttpContext context, IOptions<FoundryLocalOptions> options, CancellationToken cancellationToken) =>
 {
-    var body = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+    JsonNode? body;
+    try
+    {
+        body = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken);
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.BadRequest(new { error = "Request body is not valid JSON." });
+    }
     var requested = body?["model"]?.GetValue<string>();
     if (string.IsNullOrWhiteSpace(requested))
         return Results.BadRequest(new { error = "Request body must include a non-empty \"model\"." });
@@ -517,6 +525,12 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     {
         return Results.BadRequest(new { error = "Request body is not valid JSON." });
     }
+
+    // OpenAI requires "messages" to be an array; reject other shapes cleanly rather than throwing
+    // later (e.g. AsArray() on a JsonValue) and surfacing a 500.
+    if (requestPayload?["messages"] is JsonNode msgsNode && msgsNode is not JsonArray)
+        return Results.BadRequest(new { error = "'messages' must be an array." });
+
     var foundryOptions = options.Value;
     var ollama = ollamaOptions.Value;
 
