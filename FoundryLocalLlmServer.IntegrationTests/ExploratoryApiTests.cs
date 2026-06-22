@@ -189,4 +189,18 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    // Exploratory: a multipart content-type with a malformed body makes ReadFormAsync throw
+    // (InvalidDataException). That call is not guarded, so it surfaces as 500. Should be a clean 400.
+    [Fact]
+    public async Task Transcription_MalformedMultipart_Returns400_Not500()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("this is not a valid multipart body", Encoding.UTF8);
+        content.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data; boundary=----WebKitBoundaryXYZ");
+
+        var response = await client.PostAsync("/v1/audio/transcriptions", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

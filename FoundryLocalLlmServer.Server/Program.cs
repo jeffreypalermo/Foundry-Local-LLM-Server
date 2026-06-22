@@ -233,7 +233,17 @@ app.MapPost("/v1/audio/transcriptions", async (HttpContext context, IOptions<Fou
     if (!context.Request.HasFormContentType)
         return Results.BadRequest(new { error = "Expected multipart/form-data with a 'file' field." });
 
-    var form = await context.Request.ReadFormAsync(cancellationToken);
+    IFormCollection form;
+    try
+    {
+        form = await context.Request.ReadFormAsync(cancellationToken);
+    }
+    catch (Exception ex) when (ex is InvalidDataException or IOException)
+    {
+        // A multipart content-type with a malformed/truncated body (bad format → InvalidDataException,
+        // truncated stream → IOException) is a client error, not a 500.
+        return Results.BadRequest(new { error = "Malformed multipart/form-data body." });
+    }
     var file = form.Files.GetFile("file");
     if (file is null || file.Length == 0)
         return Results.BadRequest(new { error = "Missing audio 'file'." });
