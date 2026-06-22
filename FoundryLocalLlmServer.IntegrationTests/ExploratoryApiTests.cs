@@ -203,4 +203,87 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    // ── Round 4: content/value-shape robustness — none of these may surface a 500 ──────────────
+
+    private async Task<HttpResponseMessage> PostChat(string body)
+    {
+        var client = _factory.CreateClient();
+        return await client.PostAsync("/v1/chat/completions",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+    }
+
+    [Fact] // vision-style content: text + image_url parts (object form)
+    public async Task ChatCompletions_VisionImageUrlParts_DoesNotCrash()
+    {
+        var body = "{\"model\":\"qwen3-vl-2b-instruct\",\"messages\":[{\"role\":\"user\",\"content\":["
+            + "{\"type\":\"text\",\"text\":\"What is this?\"},"
+            + "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,iVBORw0KGgo=\"}}]}]}";
+        var r = await PostChat(body);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Fact] // malformed vision part: image_url is a bare string, not an object
+    public async Task ChatCompletions_ImageUrlAsString_DoesNotCrash()
+    {
+        var body = "{\"model\":\"qwen3-vl-2b-instruct\",\"messages\":[{\"role\":\"user\",\"content\":["
+            + "{\"type\":\"image_url\",\"image_url\":\"not-an-object\"}]}]}";
+        var r = await PostChat(body);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Fact] // a single oversized message exercises ApplyContextBounds' head-truncation branch
+    public async Task ChatCompletions_HugeContent_IsBoundedNot500()
+    {
+        var huge = new string('x', 1_000_000);
+        var body = $"{{\"model\":\"phi-4-mini\",\"messages\":[{{\"role\":\"user\",\"content\":\"{huge}\"}}]}}";
+        var r = await PostChat(body);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Fact] // content: null is valid (e.g. assistant tool-call messages) — must not crash
+    public async Task ChatCompletions_NullContent_DoesNotCrash()
+    {
+        var r = await PostChat("{\"model\":\"phi-4-mini\",\"messages\":[{\"role\":\"user\",\"content\":null}]}");
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Fact] // a very long conversation must be trimmed, not crash or hang
+    public async Task ChatCompletions_ManyMessages_IsTrimmedNot500()
+    {
+        var sb = new StringBuilder("{\"model\":\"phi-4-mini\",\"messages\":[");
+        for (var i = 0; i < 2000; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append("{\"role\":\"user\",\"content\":\"message ").Append(i).Append("\"}");
+        }
+        sb.Append("]}");
+        var r = await PostChat(sb.ToString());
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Theory] // boundary max_tokens values must not crash (huge / negative / zero)
+    [InlineData("999999999")]
+    [InlineData("-5")]
+    [InlineData("0")]
+    public async Task ChatCompletions_BoundaryMaxTokens_DoesNotCrash(string mt)
+    {
+        var body = $"{{\"model\":\"phi-4-mini\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}],\"max_tokens\":{mt}}}";
+        var r = await PostChat(body);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Fact] // unicode / emoji / control chars in content must round-trip without crashing
+    public async Task ChatCompletions_UnicodeContent_DoesNotCrash()
+    {
+        var r = await PostChat("{\"model\":\"phi-4-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"héllo 🌍 日本語 \\u0001\\u0007\"}]}");
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
+
+    [Fact] // a conversation with no user message (only system) must not crash
+    public async Task ChatCompletions_OnlySystemMessage_DoesNotCrash()
+    {
+        var r = await PostChat("{\"model\":\"phi-4-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"}]}");
+        Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode);
+    }
 }
