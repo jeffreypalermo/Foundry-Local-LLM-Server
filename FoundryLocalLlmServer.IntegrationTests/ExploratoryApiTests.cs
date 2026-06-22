@@ -141,6 +141,36 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
         Assert.DoesNotContain("text/event-stream", response.Content.Headers.ContentType?.ToString() ?? "");
     }
 
+    // Exploratory: a body that is valid JSON but not an object (array, number, string, bool) must be a
+    // clean 400 — indexing a JsonArray/JsonValue with a string property name throws → 500 otherwise.
+    [Theory]
+    [InlineData("[1,2,3]")]
+    [InlineData("42")]
+    [InlineData("\"hello\"")]
+    [InlineData("true")]
+    public async Task ChatCompletions_NonObjectBody_Returns400_Not500(string body)
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("[1,2,3]")]
+    [InlineData("42")]
+    [InlineData("\"hello\"")]
+    [InlineData("true")]
+    public async Task SelectModel_NonObjectBody_Returns400_Not500(string body)
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/models/select", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     // Exploratory (security): the transcription "model" form field is interpolated into the foundry
     // CLI argument string. A value that isn't an allow-listed alias (here, one carrying an injected
     // "-f" argument) must be rejected with a 400 before it can reach the process — mirroring how the

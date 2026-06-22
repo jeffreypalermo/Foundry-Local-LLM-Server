@@ -204,7 +204,9 @@ app.MapPost("/api/models/select", async (HttpContext context, IOptions<FoundryLo
     {
         return Results.BadRequest(new { error = "Request body is not valid JSON." });
     }
-    var requested = body?["model"] is JsonValue mv && mv.TryGetValue<string>(out var ms) ? ms : null;
+    if (body is not JsonObject)
+        return Results.BadRequest(new { error = "Request body must be a JSON object." });
+    var requested = body["model"] is JsonValue mv && mv.TryGetValue<string>(out var ms) ? ms : null;
     if (string.IsNullOrWhiteSpace(requested))
         return Results.BadRequest(new { error = "Request body must include a non-empty \"model\"." });
 
@@ -545,10 +547,15 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
         return Results.BadRequest(new { error = "Request body is not valid JSON." });
     }
 
+    // The body must be a JSON object. A top-level array / number / string / bool is valid JSON but
+    // indexing it with a string property name (e.g. ["messages"]) throws → 500; reject it as a 400.
+    if (requestPayload is not JsonObject)
+        return Results.BadRequest(new { error = "Request body must be a JSON object." });
+
     // OpenAI requires "messages" to be a non-empty array. Reject other shapes / empty / missing
     // cleanly with a 400 — otherwise an empty array is forwarded to the daemon (confusing 404
     // "model not found") or answered by the stub, and a non-array throws (AsArray) → 500.
-    if (requestPayload?["messages"] is not JsonArray messagesArray || messagesArray.Count == 0)
+    if (requestPayload["messages"] is not JsonArray messagesArray || messagesArray.Count == 0)
         return Results.BadRequest(new { error = "'messages' must be a non-empty array." });
 
     // Each element must be an object with a non-empty string "role". Anything else (a bare number,
