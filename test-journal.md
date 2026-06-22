@@ -336,3 +336,23 @@ full-length vision-generation tests (`describe` / `OCR` / `upload`). Re-run of t
 
 Confirms the multi-client contract — **two distinct client apps against one hardened Foundry Local
 server** — still holds after all the request-handling hardening.
+
+---
+
+## 14. Multi-round testing pass — run rounds until one is clean
+
+Directive: run up to 10 complete testing rounds; if a round finds & fixes a bug, start a fresh round;
+stop only when a complete round finds nothing. **Outcome: 6 rounds — 3 found bugs (all fixed
+test-first), then 3 consecutive clean rounds.**
+
+| Round | Dimension | Finding → fix |
+|------:|-----------|---------------|
+| 1 | Full GPU matrix + cancellation | **2 bugs.** `AppHost_SendPrompt` Playwright test timed out at 120 s on cold-start full-length generation → widened to 240 s. Client disconnect made the request token fire and was logged as *"Unhandled exception"* + took the 500 path → now caught as `OperationCanceledException` → Information log, early return. (Matrix models tested before stopping the run all passed.) |
+| 2 | HTTP/JSON body shape | **1 bug.** A non-object body (`[1,2,3]`, `42`, `"hi"`, `true`) made `["messages"]` / `["model"]` index a `JsonArray`/`JsonValue` → 500. Now require a JSON object up front → 400 on both chat + select. |
+| 3 | Transcription / multipart | **1 bug.** `ReadFormAsync` was unguarded; a malformed/truncated multipart body threw `InvalidDataException`/`IOException` → 500. Now → 400. |
+| 4 | Content/value shapes | **Clean.** 10 new probes (vision `image_url` parts object + bare-string, 1 MB single message → head-truncation, `content:null`, 2000-message trim, `max_tokens` 999999999/-5/0, unicode+control chars, system-only). All non-500. |
+| 5 | Concurrency + cancellation (live) | **Clean.** 5 concurrent same-model → all 200 (gate serializes); 2 concurrent different-model → both 200 (exclusive load, no OOM); client abort mid-request → post-cancel request 200 in 18 s (**gate released**, no deadlock) and cancellation logged as info (1), not unhandled error (0) — the §1 fix verified live. |
+| 6 | Comprehensive confirmation | **Clean.** Full solution build (0 warn/0 err), unit 2/2, non-GPU integration **39/39**, frontend `npm run build` ✓, live smoke text/tools/audio all 200 (Whisper returns the correct transcript). |
+
+Each fix landed test-first (failing → green) and was re-verified live. The non-GPU regression suite
+grew from 11 → **39** tests over the pass. Stopped per the rule after three consecutive clean rounds.
