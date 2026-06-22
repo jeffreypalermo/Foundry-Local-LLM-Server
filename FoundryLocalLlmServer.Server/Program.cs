@@ -559,6 +559,10 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
         var pinned = reqObj["model"] is JsonValue mv && mv.TryGetValue<string>(out var ms) ? ms : null;
         if (string.IsNullOrWhiteSpace(pinned))
             reqObj["model"] = GetSelectedModel();
+
+        // Normalize "stream" to a real boolean so a non-bool value (e.g. "yes") is never forwarded to
+        // the daemon (which rejects it) — and so every downstream isStreaming check is trivially correct.
+        reqObj["stream"] = OpenAiChatHelpers.WantsStreaming(reqObj);
     }
 
     // Bound the request so a single call can't blow up the in-process Foundry CUDA KV-cache arena:
@@ -576,8 +580,8 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     if (foundryOptions.UseStubResponses)
     {
         var prompt = OpenAiChatHelpers.ExtractLatestUserPrompt(requestPayload);
-        var model = requestPayload?["model"]?.GetValue<string>() ?? GetSelectedModel();
-        var isStreamingStub = requestPayload?["stream"]?.GetValue<bool>() == true;
+        var model = (requestPayload?["model"] as JsonValue)?.TryGetValue<string>(out var sm) == true ? sm! : GetSelectedModel();
+        var isStreamingStub = OpenAiChatHelpers.WantsStreaming(requestPayload);
 
         if (isStreamingStub)
         {
@@ -619,17 +623,14 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
 
             // Cap max_tokens to the model's total context window to prevent OOM/400 errors
             var effectiveCap = maxTokensCap > 0 ? maxTokensCap : DefaultMaxTokensFallback;
-            if (requestPayload?["max_tokens"] is JsonNode maxTokensNode)
+            if (OpenAiChatHelpers.PositiveInt(requestPayload, "max_tokens") is int requested
+                && requested > effectiveCap)
             {
-                var requested = maxTokensNode.GetValue<int>();
-                if (requested > effectiveCap)
-                {
-                    logger.LogInformation("Capping max_tokens from {Requested} to {Cap}", requested, effectiveCap);
-                    requestPayload["max_tokens"] = effectiveCap;
-                }
+                logger.LogInformation("Capping max_tokens from {Requested} to {Cap}", requested, effectiveCap);
+                requestPayload!["max_tokens"] = effectiveCap;
             }
 
-            var isStreaming = requestPayload?["stream"]?.GetValue<bool>() == true;
+            var isStreaming = OpenAiChatHelpers.WantsStreaming(requestPayload);
             var payloadJson = requestPayload?.ToJsonString() ?? "{}";
 
             // Serialize requests — Foundry Local crashes on concurrent streaming requests
@@ -745,9 +746,9 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
                 
                 // Extract data from the already-parsed requestPayload
                 var messages = requestPayload?["messages"];
-                var model = requestPayload?["model"]?.GetValue<string>() ?? ollama.Model;
-                var stream = requestPayload?["stream"]?.GetValue<bool>() ?? false;
-                var maxTokens = requestPayload?["max_tokens"]?.GetValue<int>();
+                var model = (requestPayload?["model"] as JsonValue)?.TryGetValue<string>(out var om) == true ? om! : ollama.Model;
+                var stream = OpenAiChatHelpers.WantsStreaming(requestPayload);
+                var maxTokens = OpenAiChatHelpers.PositiveInt(requestPayload, "max_tokens");
                 
                 // Create a new payload for Ollama with cloned messages
                 var ollamaBody = new JsonObject

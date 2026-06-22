@@ -50,6 +50,18 @@ public static class OpenAiChatHelpers
     }
 
     /// <summary>
+    /// True only when the client explicitly set <c>stream: true</c>. A non-boolean <c>stream</c>
+    /// (string, number, null, missing) is treated as non-streaming rather than throwing in
+    /// GetValue&lt;bool&gt;() — which would surface as a 500.
+    /// </summary>
+    public static bool WantsStreaming(JsonNode? payload) =>
+        payload?["stream"] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
+    /// <summary>Reads a positive integer field defensively (non-int / ≤ 0 → null), never throwing.</summary>
+    public static int? PositiveInt(JsonNode? payload, string field) =>
+        payload?[field] is JsonValue v && v.TryGetValue<int>(out var n) && n > 0 ? n : null;
+
+    /// <summary>
     /// Rough token estimate (~4 chars/token) used only to bound request size; it does not need to
     /// match the model tokenizer exactly, only to be monotonic so trimming converges.
     /// </summary>

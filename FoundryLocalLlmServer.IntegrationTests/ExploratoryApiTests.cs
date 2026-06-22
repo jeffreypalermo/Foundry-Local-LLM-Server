@@ -121,4 +121,22 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
 
         Assert.NotEqual(HttpStatusCode.InternalServerError, response.StatusCode);
     }
+
+    // Exploratory: a non-boolean "stream" (string or number) must not crash the proxy. GetValue<bool>()
+    // throws on a non-bool JsonValue → 500. A non-bool should be treated as non-streaming (false).
+    [Theory]
+    [InlineData("\"yes\"")]
+    [InlineData("1")]
+    [InlineData("null")]
+    public async Task ChatCompletions_NonBooleanStream_DoesNotCrash(string streamValue)
+    {
+        using var client = _factory.CreateClient();
+        var body = $"{{\"model\":\"phi-4-mini\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}],\"stream\":{streamValue}}}";
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.NotEqual(HttpStatusCode.InternalServerError, response.StatusCode);
+        // A non-bool stream means non-streaming: a normal JSON body, not an SSE stream.
+        Assert.DoesNotContain("text/event-stream", response.Content.Headers.ContentType?.ToString() ?? "");
+    }
 }
