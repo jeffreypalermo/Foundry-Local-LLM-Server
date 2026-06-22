@@ -537,6 +537,18 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
     if (requestPayload?["messages"] is not JsonArray messagesArray || messagesArray.Count == 0)
         return Results.BadRequest(new { error = "'messages' must be a non-empty array." });
 
+    // Each element must be an object with a non-empty string "role". Anything else (a bare number,
+    // a numeric role) would throw deeper in ApplyContextBounds (m["role"] / GetValue<string>) → 500;
+    // reject it up front with a spec-aligned 400.
+    foreach (var msg in messagesArray)
+    {
+        if (msg is not JsonObject msgObj
+            || !(msgObj["role"] is JsonValue roleVal && roleVal.TryGetValue<string>(out var roleStr) && !string.IsNullOrWhiteSpace(roleStr)))
+        {
+            return Results.BadRequest(new { error = "Each message must be an object with a non-empty string 'role'." });
+        }
+    }
+
     var foundryOptions = options.Value;
     var ollama = ollamaOptions.Value;
 

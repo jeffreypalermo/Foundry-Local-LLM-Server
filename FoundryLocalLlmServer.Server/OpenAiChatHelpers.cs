@@ -7,35 +7,40 @@ public static class OpenAiChatHelpers
 {
     public static string ExtractLatestUserPrompt(JsonNode? payload)
     {
-        var messages = payload?["messages"]?.AsArray();
-
-        if (messages is null)
+        if (payload?["messages"] is not JsonArray messages)
         {
             return string.Empty;
         }
 
         for (var i = messages.Count - 1; i >= 0; i--)
         {
-            var role = messages[i]?["role"]?.GetValue<string>();
+            // Defensive throughout: non-object messages and non-string role/content/part-text are
+            // tolerated (skipped / treated as empty) rather than throwing → never a 500.
+            var role = (messages[i] as JsonObject)?["role"] is JsonValue rv && rv.TryGetValue<string>(out var r) ? r : null;
 
             if (!string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var contentNode = messages[i]?["content"];
+            var contentNode = (messages[i] as JsonObject)?["content"];
             if (contentNode is null)
             {
                 return string.Empty;
             }
 
-            if (contentNode is JsonValue)
+            if (contentNode is JsonValue cv)
             {
-                return contentNode.GetValue<string>();
+                return cv.TryGetValue<string>(out var c) ? c : string.Empty;
             }
 
-            var textParts = contentNode.AsArray()
-                .Select(part => part?["text"]?.GetValue<string>())
+            if (contentNode is not JsonArray parts)
+            {
+                return string.Empty;
+            }
+
+            var textParts = parts
+                .Select(part => (part as JsonObject)?["text"] is JsonValue tv && tv.TryGetValue<string>(out var t) ? t : null)
                 .Where(text => !string.IsNullOrWhiteSpace(text));
 
             return string.Join(" ", textParts!);
@@ -52,14 +57,18 @@ public static class OpenAiChatHelpers
         string.IsNullOrEmpty(text) ? 0 : Math.Max(1, text.Length / 4);
 
     /// <summary>Extracts the plain text of a chat message's <c>content</c> (string or parts array).</summary>
+    /// <remarks>Defensive: non-string scalar content (e.g. a number) and non-string part text are
+    /// treated as empty rather than throwing, so a malformed payload can never crash bounding → 500.</remarks>
     private static string MessageText(JsonNode? message)
     {
-        var content = message?["content"];
+        var content = (message as JsonObject)?["content"];
         if (content is null) return string.Empty;
-        if (content is JsonValue v) return v.GetValue<string>();
-        return string.Join(" ", content.AsArray()
-            .Select(p => p?["text"]?.GetValue<string>())
-            .Where(t => !string.IsNullOrWhiteSpace(t))!);
+        if (content is JsonValue v) return v.TryGetValue<string>(out var s) ? s : string.Empty;
+        if (content is JsonArray arr)
+            return string.Join(" ", arr
+                .Select(p => (p as JsonObject)?["text"] is JsonValue tv && tv.TryGetValue<string>(out var t) ? t : null)
+                .Where(t => !string.IsNullOrWhiteSpace(t)));
+        return string.Empty;
     }
 
     /// <summary>

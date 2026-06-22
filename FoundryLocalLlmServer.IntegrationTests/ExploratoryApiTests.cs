@@ -86,4 +86,39 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
 
         Assert.NotEqual(HttpStatusCode.InternalServerError, response.StatusCode);
     }
+
+    // Exploratory: a "messages" element that isn't an object (e.g. a bare number) is invalid input.
+    // ApplyContextBounds indexes each element (m["role"]) which throws on a JsonValue → 500. Must be 400.
+    [Fact]
+    public async Task ChatCompletions_NonObjectMessageElement_Returns400_Not500()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{\"model\":\"phi-4-mini\",\"messages\":[123]}", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Exploratory: a non-string "role" (GetValue<string>() throws) is invalid input → 400, not 500.
+    [Fact]
+    public async Task ChatCompletions_NonStringRole_Returns400_Not500()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{\"model\":\"phi-4-mini\",\"messages\":[{\"role\":5,\"content\":\"hi\"}]}", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Exploratory: numeric "content" (MessageText calls GetValue<string>() on it) must not crash the
+    // proxy — the bounding/prompt helpers should tolerate it rather than surface a 500.
+    [Fact]
+    public async Task ChatCompletions_NumericContent_DoesNotCrash()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{\"model\":\"phi-4-mini\",\"messages\":[{\"role\":\"user\",\"content\":123}]}", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.NotEqual(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
 }
