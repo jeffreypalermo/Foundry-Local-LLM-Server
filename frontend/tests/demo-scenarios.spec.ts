@@ -9,6 +9,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = 'http://localhost:5173';
 const SERVER = 'http://localhost:5537';
 const LONG = 6 * 60 * 1000;
+// Vision generations can ramble to the full 2048-token cap on a trivial image: the tiny 2B-VL model
+// keeps describing "compressed/abstract" content with no early stop, taking ~5.5–6.5 min on this GPU
+// (vs ~30s when it stops naturally). A 6-min cap straddles that worst case → flaky; 12 min clears it.
+const VLONG = 12 * 60 * 1000;
 
 async function load(page: Page) {
   await page.goto(FRONTEND);
@@ -168,28 +172,28 @@ test.describe('Scenario behavior — live', () => {
   test('reasoning: math', async ({ page }) => { test.setTimeout(LONG); const t = await runChatScenario(page, 'deepseek-r1-1.5b', 'math'); expect(t.length).toBeGreaterThan(0); });
 
   test('vision: describe', async ({ page }) => {
-    test.setTimeout(LONG);
+    test.setTimeout(VLONG);
     await load(page);
     await selectModel(page, 'qwen3-vl-2b-instruct');
     await switchTab(page, 'Vision');
     await page.getByTestId('scenario-describe').click();
     await expect(page.locator('img.preview')).toBeVisible();
     await page.locator('button:has-text("Describe Image")').click();
-    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: VLONG });
   });
 
   test('vision: OCR built-in', async ({ page }) => {
-    test.setTimeout(LONG);
+    test.setTimeout(VLONG);
     await load(page);
     await selectModel(page, 'qwen3-vl-2b-instruct');
     await switchTab(page, 'Vision');
     await page.getByTestId('scenario-ocr').click();
     await page.locator('button:has-text("Describe Image")').click();
-    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: VLONG });
   });
 
   test('vision: upload your own', async ({ page }) => {
-    test.setTimeout(LONG);
+    test.setTimeout(VLONG);
     await load(page);
     await selectModel(page, 'qwen3-vl-2b-instruct');
     await switchTab(page, 'Vision');
@@ -197,7 +201,7 @@ test.describe('Scenario behavior — live', () => {
     await page.locator('input[aria-label="Image"]').setInputFiles(resolve(__dirname, 'assets/green-circle.png'));
     await expect(page.locator('img.preview')).toBeVisible();
     await page.locator('button:has-text("Describe Image")').click();
-    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+    await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: VLONG });
   });
 
   test('switching models clears the previous conversation', async ({ page }) => {

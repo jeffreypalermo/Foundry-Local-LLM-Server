@@ -311,3 +311,28 @@ Probes that found **no** bug (verified-good): `content` as an object or vision p
 return empty / extract text, never throw); `stream:null` (treated as non-streaming); concurrent
 two-client requests (serialized by `_foundryRequestGate`); `foundry` invoked with
 `UseShellExecute=false` (no shell — only the arg-injection vector above, now closed).
+
+---
+
+## 13. Two-client end-to-end validation against the hardened server
+
+After rounds §11–§12, re-ran both client suites against the live hardened Server (`:5537`) to confirm
+the added 400s / stream-normalization / allow-list didn't regress real usage (the clients only send
+well-formed requests).
+
+- **Blazor WASM (`:5180`) — 6/6 pass** (2.4 min): catalog cross-origin load, text chat, multi-turn
+  context, tools panel (C# `tool_calls` serialization), full tool loop (1.5 min), speech-to-text.
+- **React SPA (`:5173`) — 22/22 after a flake fix** (first run 21/22, 13 min): all structure +
+  multi-turn + behavior scenarios (text/code/reasoning/vision/tools/audio) green.
+
+**Flaky test found & fixed (not a server bug):** `vision: upload your own` timed out at the 6-min
+cap. Reproduced the *exact* request directly via the API → **200 in 29 s** with `max_tokens=64`
+(path healthy). Root cause: `green-circle.png` is a trivial abstract image, so the tiny
+`qwen3-vl-2b-instruct` (2B) **rambles to the full 2048-token cap** with no early stop — legitimately
+~5.5–6.5 min on this GPU (the built-in describe/OCR images stop naturally in ~30 s). That worst case
+straddles the 6-min timeout → flaky. Fix: a vision-specific `VLONG = 12 min` timeout for the three
+full-length vision-generation tests (`describe` / `OCR` / `upload`). Re-run of the failing test →
+**pass (5.5 min)**.
+
+Confirms the multi-client contract — **two distinct client apps against one hardened Foundry Local
+server** — still holds after all the request-handling hardening.
