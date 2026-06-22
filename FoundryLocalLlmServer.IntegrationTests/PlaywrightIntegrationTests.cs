@@ -108,11 +108,13 @@ public class PlaywrightIntegrationTests : IAsyncDisposable
             });
             _output.WriteLine("Button shows 'Running...' — request in progress.");
 
-            // Wait for the assistant response to appear (up to 120 seconds for model inference)
+            // Wait for the assistant response. The SPA's default prompt sends no max_tokens, so the
+            // server caps it to MaxResponseTokens (2048); a cold-start full-length generation can take
+            // well over 2 min on first inference, so allow 4 min to avoid a flaky cancellation.
             var assistantMessage = page.Locator("article.message.assistant p");
             await assistantMessage.First.WaitForAsync(new LocatorWaitForOptions
             {
-                Timeout = 120000,
+                Timeout = 240000,
                 State = WaitForSelectorState.Visible,
             });
 

@@ -866,6 +866,14 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
             detail: "Unexpected error in chat completions handler.",
             statusCode: 500);
     }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // The client disconnected / aborted the request (e.g. a UI timeout or navigation). This is a
+        // normal client-side event, not a server fault — log it quietly and don't take the 500 path
+        // (the caller is gone anyway). Returning early avoids a noisy "Unhandled exception" error log.
+        logger.LogInformation("Client canceled the chat request before completion.");
+        return Results.Empty;
+    }
     catch (Exception ex)
     {
         logger.LogError(ex, "Unhandled exception in /v1/chat/completions");
