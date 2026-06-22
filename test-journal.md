@@ -279,3 +279,35 @@ content (no regression); numeric `content` live → **200** (defensive handling 
 Probes that found **no** bug (kept as verified-good): `max_tokens` as a string or ≤ 0 (already
 guarded by `TryGetValue<int>` + `> 0` → falls back to default); unknown `model` on select (already a
 clean 400 with the available list); malformed-JSON body on both endpoints (already 400).
+
+---
+
+## 12. Fresh exploratory round — inference-path & security hardening
+
+A third adversarial pass, this time on the paths that touch inference (streaming, context bounds) and
+the one place user input reaches a subprocess (transcription). Same loop: failing test → fix → green
+→ live re-verify.
+
+| # | Bug found | Test (failed → passes) | Fix |
+|---|-----------|------------------------|-----|
+| 13 | A non-boolean `stream` (`"yes"`, `1`) → **500** (`GetValue<bool>()` threw) at all three isStreaming sites; even once guarded, the invalid value was forwarded to the daemon → **404** | `…NonBooleanStream_DoesNotCrash` (`"yes"`/`1`/`null`) | `WantsStreaming()` helper (bool-only, never throws) + **normalize** `stream` to a real boolean in the payload before forwarding |
+| 14 | `max_tokens` as a string/float would throw in `GetValue<int>()` if `MaxResponseTokens` bounding were disabled | covered by the same suite | `PositiveInt()` helper (safe positive-int read) at both `max_tokens` sites |
+| 15 | **(security)** `/v1/audio/transcriptions` interpolated the user-supplied `model` form field into the `foundry` CLI argument string **unvalidated** — argument injection (e.g. `whisper-base -f C:\victim.wav` injects an extra `-f`). `UseShellExecute=false` rules out a *shell*, but not extra-arg injection into `foundry.exe`. `language` was already regex-validated; `model` was not. | `Transcription_ModelNotInAllowlist_Returns400` | Allow-list `model` against `AvailableModels` before it reaches the process (mirrors `/api/models/select`) |
+
+Result: **20/20 non-GPU + 2 unit green.**
+
+Live re-verification against `:5537`: `stream:"yes"` → **200 application/json** (normalized to
+non-streaming); `stream:true` → **200 text/event-stream** (real SSE intact); transcription with an
+injected `-f` argument → **400** (rejected before any process spawn); legit `whisper-base` clip →
+**200** `{"text":"The quick brown fox jumps over the lazy dog.",…}` (allow-list doesn't break the
+happy path).
+
+Context-bounds verified **end-to-end** live (the helpers I hardened feed `ApplyContextBounds`): a
+62-message conversation → **40 dropped**, input trimmed to ~7.8k under the 8192 budget, leading
+system message preserved, **200**; a 40-message / 7.5k conversation → **0 dropped** (correctly fits).
+`X-Context-Dropped-Messages` / `-Max-Tokens` / `-Input-Tokens` all emit correctly.
+
+Probes that found **no** bug (verified-good): `content` as an object or vision parts array (helpers
+return empty / extract text, never throw); `stream:null` (treated as non-streaming); concurrent
+two-client requests (serialized by `_foundryRequestGate`); `foundry` invoked with
+`UseShellExecute=false` (no shell — only the arg-injection vector above, now closed).

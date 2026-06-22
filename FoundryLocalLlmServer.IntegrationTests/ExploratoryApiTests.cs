@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using Xunit;
 
@@ -138,5 +139,24 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
         Assert.NotEqual(HttpStatusCode.InternalServerError, response.StatusCode);
         // A non-bool stream means non-streaming: a normal JSON body, not an SSE stream.
         Assert.DoesNotContain("text/event-stream", response.Content.Headers.ContentType?.ToString() ?? "");
+    }
+
+    // Exploratory (security): the transcription "model" form field is interpolated into the foundry
+    // CLI argument string. A value that isn't an allow-listed alias (here, one carrying an injected
+    // "-f" argument) must be rejected with a 400 before it can reach the process — mirroring how the
+    // language field is validated and how /api/models/select allow-lists the model.
+    [Fact]
+    public async Task Transcription_ModelNotInAllowlist_Returns400()
+    {
+        using var client = _factory.CreateClient();
+        using var form = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent([1, 2, 3, 4]);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+        form.Add(fileContent, "file", "clip.wav");
+        form.Add(new StringContent("whisper-base -f C:\\victim.wav"), "model");
+
+        var response = await client.PostAsync("/v1/audio/transcriptions", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }

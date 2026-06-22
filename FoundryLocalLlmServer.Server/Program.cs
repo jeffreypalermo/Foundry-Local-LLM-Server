@@ -239,6 +239,20 @@ app.MapPost("/v1/audio/transcriptions", async (HttpContext context, IOptions<Fou
     var model = form["model"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(model)) model = GetSelectedModel();
 
+    // Validate the model against the allow-list before it reaches the CLI argument string. Even with
+    // UseShellExecute=false (no shell), an unvalidated value could inject extra `foundry` arguments
+    // (e.g. "whisper-base -f C:\victim.wav"). This mirrors /api/models/select and the language check.
+    var availableModels = options.Value.AvailableModels ?? [];
+    if (availableModels.Length > 0
+        && !availableModels.Contains(model, StringComparer.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new
+        {
+            error = $"Model '{model}' is not in AvailableModels.",
+            available = availableModels,
+        });
+    }
+
     // Optional language hint (e.g. "en"). Validated to a short alpha code to keep it shell-safe.
     var language = form["language"].FirstOrDefault();
     if (!string.IsNullOrWhiteSpace(language) && !Regex.IsMatch(language, "^[a-zA-Z]{2,8}$"))
