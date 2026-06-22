@@ -247,3 +247,35 @@ app uses; the Server now enables CORS so the cross-origin browser client can cal
   catalog loads cross-origin from the shared server; text chat round-trips; multi-turn conversation
   retains context (recalls the name/pet); speech-to-text returns the transcript.
 - Confirms **two distinct client apps (React + Blazor) against one Foundry Local server process**.
+
+---
+
+## 11. Fresh exploratory round — request-validation hardening (two clients + server)
+
+A second adversarial pass over the proxy's request-handling surface, both clients (React `:5173`,
+Blazor `:5180`) live against the one server (`:5537`). Every malformed shape that produced a 500 (or
+a confusing 404/200) was captured as a failing `ExploratoryApiTests` case first, then fixed, then
+re-run green — and finally re-verified against the **live** server.
+
+| # | Bug found | Test (failed → passes) | Fix |
+|---|-----------|------------------------|-----|
+| 7 | `messages:[]` / missing `messages` → forwarded to daemon (404 "model not found") or answered by stub (200) | `…EmptyOrMissingMessages…` (×2) | Validate non-empty array → **400** |
+| 8 | `POST /api/models/select` with non-string `model` (e.g. `123`) → **500** (`GetValue<string>` threw) | `…SelectModel_NonStringModel…` | Safe `TryGetValue<string>` → **400** |
+| 9 | Chat with non-string `model` → **500** | `…ChatCompletions_NonStringModel_DoesNotCrash` | Falls back to selected default (no throw) |
+| 10 | `messages:[123]` (non-object element) → **500** (`m["role"]` indexed a `JsonValue`) | `…NonObjectMessageElement…` | Per-element validation → **400** |
+| 11 | `messages:[{"role":5,…}]` (non-string role) → **500** | `…NonStringRole…` | Per-element validation → **400** |
+| 12 | `content:123` (numeric) → **500** (`MessageText`/`ExtractLatestUserPrompt` called `GetValue<string>`) | `…NumericContent_DoesNotCrash` | Helpers tolerate non-string content/part-text → no throw |
+
+`OpenAiChatHelpers.ExtractLatestUserPrompt` and `MessageText` were made defensive throughout
+(`TryGetValue`, `JsonArray`/`JsonObject` pattern checks) so no malformed node can ever crash the
+bounding/prompt path. Result: **16/16 non-GPU + 2 unit green.**
+
+Live re-verification against `:5537` (all as expected, fast validation paths short-circuit before
+inference): select unknown model → **400**; select non-string → **400**; select valid → **200**;
+chat empty messages → **400**; `messages:[123]` → **400**; numeric role → **400**; transcriptions
+no file → **400**; `GET` on the chat endpoint → **405**. Real chat (`qwen3-0.6b`) → **200** with
+content (no regression); numeric `content` live → **200** (defensive handling held, no 500).
+
+Probes that found **no** bug (kept as verified-good): `max_tokens` as a string or ≤ 0 (already
+guarded by `TryGetValue<int>` + `> 0` → falls back to default); unknown `model` on select (already a
+clean 400 with the available list); malformed-JSON body on both endpoints (already 400).
