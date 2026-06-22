@@ -47,4 +47,43 @@ public class ExploratoryApiTests : IClassFixture<ServerFactory>
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    // Exploratory: an empty "messages" array is invalid (OpenAI requires a non-empty array). It must
+    // be a clean 400 — not forwarded to the daemon (which returns a confusing 404 "model not found")
+    // nor answered by the stub.
+    [Theory]
+    [InlineData("{\"model\":\"phi-4-mini\",\"messages\":[]}")]
+    [InlineData("{\"model\":\"phi-4-mini\"}")]
+    public async Task ChatCompletions_EmptyOrMissingMessages_Returns400(string body)
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Exploratory: a non-string "model" must not crash the select endpoint (GetValue<string>() throws
+    // on a JSON number) — it should be a clean 400.
+    [Fact]
+    public async Task SelectModel_NonStringModel_Returns400_Not500()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{\"model\":123}", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/models/select", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Exploratory: a non-string "model" in a chat request must not surface as a 500 — the proxy should
+    // fall back to the selected default rather than throw in GetValue<string>().
+    [Fact]
+    public async Task ChatCompletions_NonStringModel_DoesNotCrash()
+    {
+        using var client = _factory.CreateClient();
+        var content = new StringContent("{\"model\":123,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/v1/chat/completions", content);
+
+        Assert.NotEqual(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
 }

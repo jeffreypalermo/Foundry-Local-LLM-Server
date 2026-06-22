@@ -49,6 +49,28 @@ test('Blazor client: multi-turn conversation retains context', async ({ page }) 
   expect(/alice|max|retriever|golden/.test(transcript)).toBe(true);
 });
 
+test('Blazor client: tools panel round-trips (C# tool_calls serialization)', async ({ page }) => {
+  test.setTimeout(LONG);
+  await loadBlazor(page);
+  await selectModel(page, 'phi-4-mini');
+  await page.locator('button.mode-tab:has-text("Tools")').click();
+  await page.locator('.scenario-chip:has-text("Calculator")').click();
+  await page.locator('button:has-text("Send with Tools")').click();
+  await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+  await expect(page.locator('p.error')).toHaveCount(0);
+});
+
+test('Blazor client: full tool loop (multi-turn role:tool from C#)', async ({ page }) => {
+  test.setTimeout(LONG);
+  await loadBlazor(page);
+  await selectModel(page, 'phi-4-mini');
+  await page.locator('button.mode-tab:has-text("Tools")').click();
+  await page.locator('.scenario-chip:has-text("Full tool loop")').click();
+  await page.locator('button:has-text("Send with Tools")').click();
+  await expect(page.locator('article.message.assistant p').first()).toBeVisible({ timeout: LONG });
+  await expect(page.locator('p.error')).toHaveCount(0);
+});
+
 test('Blazor client: speech-to-text via the shared server', async ({ page }) => {
   test.setTimeout(LONG);
   await loadBlazor(page);

@@ -204,7 +204,7 @@ app.MapPost("/api/models/select", async (HttpContext context, IOptions<FoundryLo
     {
         return Results.BadRequest(new { error = "Request body is not valid JSON." });
     }
-    var requested = body?["model"]?.GetValue<string>();
+    var requested = body?["model"] is JsonValue mv && mv.TryGetValue<string>(out var ms) ? ms : null;
     if (string.IsNullOrWhiteSpace(requested))
         return Results.BadRequest(new { error = "Request body must include a non-empty \"model\"." });
 
@@ -531,20 +531,22 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<Foundry
         return Results.BadRequest(new { error = "Request body is not valid JSON." });
     }
 
-    // OpenAI requires "messages" to be an array; reject other shapes cleanly rather than throwing
-    // later (e.g. AsArray() on a JsonValue) and surfacing a 500.
-    if (requestPayload?["messages"] is JsonNode msgsNode && msgsNode is not JsonArray)
-        return Results.BadRequest(new { error = "'messages' must be an array." });
+    // OpenAI requires "messages" to be a non-empty array. Reject other shapes / empty / missing
+    // cleanly with a 400 — otherwise an empty array is forwarded to the daemon (confusing 404
+    // "model not found") or answered by the stub, and a non-array throws (AsArray) → 500.
+    if (requestPayload?["messages"] is not JsonArray messagesArray || messagesArray.Count == 0)
+        return Results.BadRequest(new { error = "'messages' must be a non-empty array." });
 
     var foundryOptions = options.Value;
     var ollama = ollamaOptions.Value;
 
-    // Default to the runtime-selected model when the client doesn't pin one, so POST
-    // /api/models/select governs which model serves model-less requests.
-    if (requestPayload is JsonObject reqObj
-        && (reqObj["model"] is null || string.IsNullOrWhiteSpace(reqObj["model"]!.GetValue<string>())))
+    // Default to the runtime-selected model when the client doesn't pin one (or pins a non-string),
+    // so POST /api/models/select governs model-less requests and a bad "model" never throws → 500.
+    if (requestPayload is JsonObject reqObj)
     {
-        reqObj["model"] = GetSelectedModel();
+        var pinned = reqObj["model"] is JsonValue mv && mv.TryGetValue<string>(out var ms) ? ms : null;
+        if (string.IsNullOrWhiteSpace(pinned))
+            reqObj["model"] = GetSelectedModel();
     }
 
     // Bound the request so a single call can't blow up the in-process Foundry CUDA KV-cache arena:
