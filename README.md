@@ -9,6 +9,7 @@
 - `frontend` - React/TypeScript SPA (Vite)
 - `FoundryLocalLlmServer.BlazorClient` - Blazor WebAssembly client (mirrors the React SPA)
 - `tools/DemoDocBuilder` - C# tool that compiles `docs/DEMO.md` from the Playwright demo captures
+- `tools/DemoVideoBuilder` - C# tool that transcodes the Playwright walkthrough recording to MP4 (ffmpeg)
 - `FoundryLocalLlmServer.UnitTests` - unit tests
 - `FoundryLocalLlmServer.IntegrationTests` - integration tests (including Microsoft.Extensions.AI chat abstraction)
 
@@ -90,6 +91,19 @@ panel for the selected model — **Text chat**, **Vision** (image upload), **Too
 capabilities of each model from the browser.
 
 Adding or removing selectable models is a config-only change to `AvailableModels`.
+
+## Demonstration video
+
+`docs/foundry-local-demo.mp4` is a captioned ~3.5-min walkthrough (1280×720, H.264) of the React SPA
+driving the live server across every headline capability — text chat, multi-turn, code generation,
+tool calling, vision, and speech-to-text. It is generated, not hand-edited: Playwright records the
+real browser session and a C# tool transcodes it.
+
+```bash
+# with the daemon + Server(:5537) + Vite(:5173) running:
+cd frontend && npx playwright test --config=playwright.video.config.ts   # records test-results-video/…/video.webm
+cd .. && dotnet run --project tools/DemoVideoBuilder                      # → docs/foundry-local-demo.mp4 (needs ffmpeg)
+```
 
 > **MAI models are out of scope (cloud-only).** Microsoft's MAI family — MAI-Thinking-1,
 > MAI-Image-2 / -Efficient, MAI-Voice-1, MAI-Transcribe-1 — runs only in **Microsoft

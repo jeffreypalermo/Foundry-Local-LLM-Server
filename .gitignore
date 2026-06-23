@@ -20,6 +20,7 @@ test-output.log
 test_output.log
 integration-test-output.txt
 frontend/test-results/
+frontend/test-results-video/
 
 # Playwright MCP session files
 .playwright-mcp/
