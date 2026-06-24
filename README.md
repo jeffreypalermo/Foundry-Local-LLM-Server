@@ -94,15 +94,25 @@ Adding or removing selectable models is a config-only change to `AvailableModels
 
 ## Demonstration video
 
-`docs/foundry-local-demo.mp4` is a captioned ~3.5-min walkthrough (1280×720, H.264) of the React SPA
-driving the live server across every headline capability — text chat, multi-turn, code generation,
-tool calling, vision, and speech-to-text. It is generated, not hand-edited: Playwright records the
-real browser session and a C# tool transcodes it.
+A captioned **~2.85 h walkthrough (1280×720, H.264, 2× speed)** that demonstrates **every mode of
+every model** — for all 41 catalog models it selects the model, then for each capability tab the SPA
+renders (text / code / reasoning / vision / tools / speech) runs every scenario and scrolls the
+fresh result into view. It is generated, not hand-edited: Playwright drives the real browser against
+the live server and a C# tool transcodes/concatenates with ffmpeg. The rendered MP4 is large, so it
+is **not committed** (regenerate with the steps below; the spec, config, and tool are in the repo).
+
+`tests/demo-video.spec.ts` is DOM-driven (covers exactly what the app exposes) and idle-aware (waits
+for the busy state to clear before each model switch / scenario, so nothing is skipped). An optional
+`MODELS=a,b,c` env var restricts the run to a subset (used to record segments). `DemoVideoBuilder`
+concatenates all `frontend/video-segments/*.webm` (in filename order) and applies an optional speed
+factor.
 
 ```bash
-# with the daemon + Server(:5537) + Vite(:5173) running:
+# with the daemon + Server(:5537) + Vite(:5173) running (lower MaxResponseTokens, e.g. 384, to keep clips tight):
 cd frontend && npx playwright test --config=playwright.video.config.ts   # records test-results-video/…/video.webm
-cd .. && dotnet run --project tools/DemoVideoBuilder                      # → docs/foundry-local-demo.mp4 (needs ffmpeg)
+# (move each run's video.webm into frontend/video-segments/ as 01-….webm, 02-….webm to keep segments)
+cd .. && dotnet run --project tools/DemoVideoBuilder -- frontend/video-segments docs/foundry-local-demo.mp4 2.0
+#                                                       └ segments dir         └ output            └ 2× speed (needs ffmpeg)
 ```
 
 > **MAI models are out of scope (cloud-only).** Microsoft's MAI family — MAI-Thinking-1,

@@ -21,6 +21,8 @@ test_output.log
 integration-test-output.txt
 frontend/test-results/
 frontend/test-results-video/
+frontend/video-segments/
+docs/foundry-local-demo.mp4
 
 # Playwright MCP session files
 .playwright-mcp/
