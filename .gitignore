@@ -38,3 +38,8 @@ architecture-c4.puml
 .squad/.scratch/
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
+# Blazor dev-server logs + exploratory sweep artifacts (runtime only)
+blazor-dev.log
+blazor-dev.err.log
+blazor-under30.out
+frontend/test-results-blazor-under30.json

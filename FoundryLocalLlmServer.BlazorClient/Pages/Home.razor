@@ -10,6 +10,10 @@
 
     <div class="controls">
         <p class="config-line">Model: <strong>@(config?.Model ?? selected ?? "loading...")</strong></p>
+        @if (ModelSeconds > 0)
+        {
+            <p class="eta-note" title="Measured from a recorded demo run; multi-step demos take longer.">⏱ Typical demo run on this model: <strong>@EtaSingle</strong> per response</p>
+        }
         <label class="picker">
             Switch model:
             <select value="@selected" @onchange="OnSelectModel" disabled="@(busy || models.Count == 0)" aria-label="Model">
@@ -30,10 +34,6 @@
                 }
             </p>
         }
-        @if (ModelSeconds > 0)
-        {
-            <p class="eta-note" title="Measured from a recorded demo run; multi-step demos take longer.">⏱ Typical demo run on this model: <strong>@EtaSingle</strong> per response</p>
-        }
     </div>
 
     @if (AvailableModes.Count > 1)
@@ -51,7 +51,7 @@
         <div class="scenario-chips">
             @foreach (var s in scenarioList)
             {
-                <button type="button" class="scenario-chip @(scenario?.Id == s.Id ? "active" : "")" @onclick="() => ApplyScenario(s)" disabled="@busy" title="@s.Hint">@s.Label</button>
+                <button type="button" data-testid="@($"scenario-{s.Id}")" class="scenario-chip @(scenario?.Id == s.Id ? "active" : "")" @onclick="() => ApplyScenario(s)" disabled="@busy" title="@s.Hint">@s.Label</button>
             }
         </div>
         @if (scenario is not null)
@@ -75,7 +75,7 @@
                     <ol class="turn-list">
                         @foreach (var t in turns) { <li>@t</li> }
                     </ol>
-                    <button type="button" @onclick="() => RunConversation(turns)" disabled="@busy">@(busy ? "Running..." : RunLabel("Run conversation", EtaScenario))</button>
+                    <button type="button" data-testid="run-conversation" @onclick="() => RunConversation(turns)" disabled="@busy">@(busy ? "Running..." : RunLabel("Run conversation", EtaScenario))</button>
                 </div>
             }
             <form @onsubmit="SendChat" class="prompt-form">
