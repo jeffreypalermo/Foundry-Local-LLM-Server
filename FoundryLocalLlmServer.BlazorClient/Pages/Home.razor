@@ -30,6 +30,10 @@
                 }
             </p>
         }
+        @if (ModelSeconds > 0)
+        {
+            <p class="eta-note" title="Measured from a recorded demo run; multi-step demos take longer.">⏱ Typical demo run on this model: <strong>@EtaSingle</strong> per response</p>
+        }
     </div>
 
     @if (AvailableModes.Count > 1)
@@ -71,12 +75,12 @@
                     <ol class="turn-list">
                         @foreach (var t in turns) { <li>@t</li> }
                     </ol>
-                    <button type="button" @onclick="() => RunConversation(turns)" disabled="@busy">@(busy ? "Running..." : "Run conversation")</button>
+                    <button type="button" @onclick="() => RunConversation(turns)" disabled="@busy">@(busy ? "Running..." : RunLabel("Run conversation", EtaScenario))</button>
                 </div>
             }
             <form @onsubmit="SendChat" class="prompt-form">
                 <textarea value="@prompt" @oninput="e => prompt = e.Value?.ToString() ?? string.Empty" placeholder="@(scenario?.Turns is { Length: > 0 } ? "Type a follow-up to continue the conversation…" : "Enter a prompt")" rows="5" disabled="@busy"></textarea>
-                <button type="submit" disabled="@(busy || config is null || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : "Send Prompt")</button>
+                <button type="submit" disabled="@(busy || config is null || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : RunLabel("Send Prompt", EtaSingle))</button>
             </form>
             <ChatLog Turns="chat" />
         </section>
@@ -91,7 +95,7 @@
                     <img class="preview" src="@imageDataUrl" alt="selected" />
                 }
                 <textarea value="@prompt" @oninput="e => prompt = e.Value?.ToString() ?? string.Empty" placeholder="Ask about the image" rows="3" disabled="@busy"></textarea>
-                <button type="submit" disabled="@(busy || imageDataUrl is null || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : "Describe Image")</button>
+                <button type="submit" disabled="@(busy || imageDataUrl is null || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : RunLabel("Describe Image", EtaSingle))</button>
             </form>
             <ChatLog Turns="chat" />
         </section>
@@ -102,7 +106,7 @@
             <p class="hint">Tools available: <code>get_weather(city)</code>, <code>calculate(expression)</code>. The model may answer in text or emit tool calls.</p>
             <form @onsubmit="SendTools" class="prompt-form">
                 <textarea value="@prompt" @oninput="e => prompt = e.Value?.ToString() ?? string.Empty" placeholder="e.g. What's the weather in Paris?" rows="3" disabled="@busy"></textarea>
-                <button type="submit" disabled="@(busy || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : "Send with Tools")</button>
+                <button type="submit" disabled="@(busy || string.IsNullOrWhiteSpace(prompt))">@(busy ? "Running..." : RunLabel("Send with Tools", EtaScenario))</button>
             </form>
             <ChatLog Turns="chat" />
         </section>
@@ -116,7 +120,7 @@
                     @(audioLanguage is not null ? $" · language={audioLanguage}" : "")
                 </p>
                 <InputFile OnChange="OnPickAudio" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg" disabled="@busy" aria-label="Audio file" />
-                <button type="submit" disabled="@(busy || (uploadedAudio is null && audioSampleUrl is null))">@(busy ? "Transcribing..." : "Transcribe")</button>
+                <button type="submit" disabled="@(busy || (uploadedAudio is null && audioSampleUrl is null))">@(busy ? "Transcribing..." : RunLabel("Transcribe", EtaSingle))</button>
             </form>
             @if (transcript is not null)
             {
@@ -150,6 +154,16 @@
     List<string> AvailableModes => ModesFor(Current);
     string Kind => KindFor(mode, Current);
     Scenario[] scenarioList => Scenarios.For(Kind);
+
+    // Expected run durations from the recorded per-model timings (tools/DemoTimingProbe).
+    int ModelSeconds => selected is not null && DemoTimings.Seconds.TryGetValue(selected, out var s) ? s : 0;
+    string EtaSingle => FormatEta(ModelSeconds);
+    string EtaScenario => FormatEta(ModelSeconds * ScenarioRequestCount(scenario));
+    static int ScenarioRequestCount(Scenario? s)
+        => s?.Turns is { Length: > 0 } t ? t.Length : (s?.FollowUpToolResult is not null ? 2 : 1);
+    static string FormatEta(int seconds)
+        => seconds <= 0 ? "" : seconds < 90 ? $"~{seconds}s" : $"~{(int)Math.Round(seconds / 60.0)} min";
+    static string RunLabel(string label, string eta) => eta == "" ? label : $"{label} · {eta}";
 
     static List<string> ModesFor(ModelInfo? m)
     {

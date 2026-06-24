@@ -46,6 +46,16 @@ button {
   margin: 0;
 }
 
+.eta-note {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.eta-note strong {
+  color: #1e3a8a;
+}
+
 .error {
   color: #b91c1c;
   font-weight: 600;

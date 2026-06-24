@@ -17,6 +17,8 @@ button { width: fit-content; padding: 0.6rem 1rem; font: inherit; cursor: pointe
 .message.assistant { background: #f5f3ff; }
 
 .config-line { margin: 0; }
+.eta-note { margin: 4px 0 0; font-size: 0.85rem; color: #475569; }
+.eta-note strong { color: #1e3a8a; }
 .error { color: #b91c1c; font-weight: 600; }
 
 .controls { display: grid; gap: 0.4rem; padding: 0.75rem; border: 1px solid #d4d4d8; border-radius: 0.5rem; background: #f8fafc; }

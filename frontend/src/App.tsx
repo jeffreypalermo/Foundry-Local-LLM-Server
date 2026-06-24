@@ -3,6 +3,23 @@ import type { ChangeEvent, FormEvent } from 'react';
 import './App.css';
 import { scenariosFor } from './scenarios';
 import type { Kind, Scenario, ToolPreset } from './scenarios';
+import { demoTimings } from './demoTimings';
+
+// How many model requests a scenario issues (multi-turn replays each turn; a full tool loop sends a
+// follow-up with the tool result), so a multi-step demo's ETA scales accordingly.
+function scenarioRequestCount(s: Scenario | null): number {
+  if (!s) return 1;
+  if (s.turns) return s.turns.length;
+  if (s.followUpToolResult) return 2;
+  return 1;
+}
+
+// Human-friendly expected duration, e.g. "~8s" or "~3 min". Empty when unknown (0).
+function formatEta(seconds: number): string {
+  if (!seconds || seconds <= 0) return '';
+  if (seconds < 90) return `~${seconds}s`;
+  return `~${Math.round(seconds / 60)} min`;
+}
 
 type FoundryConfig = { endpoint: string; model: string };
 
@@ -296,6 +313,11 @@ function App() {
     }
   };
 
+  // Expected run durations from the recorded per-model timings (tools/DemoTimingProbe).
+  const modelSeconds = demoTimings[selected] ?? 0;
+  const etaSingle = formatEta(modelSeconds);                                  // one request
+  const etaScenario = formatEta(modelSeconds * scenarioRequestCount(scenario)); // multi-step demos
+
   return (
     <main className="app-shell">
       <h1>Foundry Local OpenAI Server</h1>
@@ -304,6 +326,11 @@ function App() {
         <p className="config-line">
           Model: <strong>{config?.model ?? selected ?? 'loading...'}</strong>
         </p>
+        {modelSeconds > 0 && (
+          <p className="eta-note" title="Measured from a recorded demo run; multi-step demos take longer.">
+            ⏱ Typical demo run on this model: <strong>{etaSingle}</strong> per response
+          </p>
+        )}
         <label className="picker">
           Switch model:{' '}
           <select value={selected} onChange={onSelectModel} disabled={busy || models.length === 0} aria-label="Model">
@@ -374,7 +401,7 @@ function App() {
                 {scenario.turns.map((t, i) => (<li key={i}>{t}</li>))}
               </ol>
               <button type="button" data-testid="run-conversation" onClick={() => runConversation(scenario.turns!)} disabled={busy}>
-                {busy ? 'Running...' : 'Run conversation'}
+                {busy ? 'Running...' : `Run conversation${etaScenario ? ` · ${etaScenario}` : ''}`}
               </button>
             </div>
           )}
@@ -386,7 +413,7 @@ function App() {
               rows={5}
               disabled={busy}
             />
-            <button type="submit" disabled={busy || !config || !prompt.trim()}>{busy ? 'Running...' : 'Send Prompt'}</button>
+            <button type="submit" disabled={busy || !config || !prompt.trim()}>{busy ? 'Running...' : `Send Prompt${etaSingle ? ` · ${etaSingle}` : ''}`}</button>
           </form>
           <ChatLog chat={chat} />
         </section>
@@ -398,7 +425,7 @@ function App() {
             <input type="file" accept="image/*" onChange={onPickImage} disabled={busy} aria-label="Image" />
             {imageDataUrl && <img className="preview" src={imageDataUrl} alt="selected" />}
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask about the image" rows={3} disabled={busy} />
-            <button type="submit" disabled={busy || !imageDataUrl || !prompt.trim()}>{busy ? 'Running...' : 'Describe Image'}</button>
+            <button type="submit" disabled={busy || !imageDataUrl || !prompt.trim()}>{busy ? 'Running...' : `Describe Image${etaSingle ? ` · ${etaSingle}` : ''}`}</button>
           </form>
           <ChatLog chat={chat} />
         </section>
@@ -409,7 +436,7 @@ function App() {
           <p className="hint">Tools available: <code>get_weather(city)</code>, <code>calculate(expression)</code>. The model may answer in text or emit tool calls.</p>
           <form onSubmit={sendTools} className="prompt-form">
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. What's the weather in Paris?" rows={3} disabled={busy} />
-            <button type="submit" disabled={busy || !prompt.trim()}>{busy ? 'Running...' : 'Send with Tools'}</button>
+            <button type="submit" disabled={busy || !prompt.trim()}>{busy ? 'Running...' : `Send with Tools${etaScenario ? ` · ${etaScenario}` : ''}`}</button>
           </form>
           <ChatLog chat={chat} />
         </section>
@@ -423,7 +450,7 @@ function App() {
               {audioLanguage ? ` · language=${audioLanguage}` : ''}
             </p>
             <input type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg" onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)} disabled={busy} aria-label="Audio file" />
-            <button type="submit" disabled={busy || (!audioFile && !audioSampleUrl)}>{busy ? 'Transcribing...' : 'Transcribe'}</button>
+            <button type="submit" disabled={busy || (!audioFile && !audioSampleUrl)}>{busy ? 'Transcribing...' : `Transcribe${etaSingle ? ` · ${etaSingle}` : ''}`}</button>
           </form>
           {transcript !== null && (
             <article className="message assistant">
