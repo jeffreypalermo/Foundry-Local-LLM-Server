@@ -51,3 +51,6 @@ tts-smoke.wav
 blazor-video-full.out
 blazor-video-subset.out
 docs/blazor-under30-narrated-demo-SAMPLE.mp4
+blazor-video-patch.out
+narrator.out
+merger.out

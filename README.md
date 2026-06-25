@@ -10,6 +10,8 @@
 - `FoundryLocalLlmServer.BlazorClient` - Blazor WebAssembly client (mirrors the React SPA)
 - `tools/DemoDocBuilder` - C# tool that compiles `docs/DEMO.md` from the Playwright demo captures
 - `tools/DemoVideoBuilder` - C# tool that transcodes the Playwright walkthrough recording to MP4 (ffmpeg)
+- `tools/DemoNarrator` - C# tool that synthesizes a narration WAV per demo with the built-in Windows TTS engine (System.Speech)
+- `tools/DemoNarratedVideoBuilder` - C# tool that muxes each narration over its clip and concatenates them into one narrated MP4 (ffmpeg)
 - `FoundryLocalLlmServer.UnitTests` - unit tests
 - `FoundryLocalLlmServer.IntegrationTests` - integration tests (including Microsoft.Extensions.AI chat abstraction)
 
@@ -113,6 +115,28 @@ cd frontend && npx playwright test --config=playwright.video.config.ts   # recor
 # (move each run's video.webm into frontend/video-segments/ as 01-….webm, 02-….webm to keep segments)
 cd .. && dotnet run --project tools/DemoVideoBuilder -- frontend/video-segments docs/foundry-local-demo.mp4 2.0
 #                                                       └ segments dir         └ output            └ 2× speed (needs ffmpeg)
+```
+
+### Narrated walkthrough of the fast demos (Blazor client)
+
+A second video focuses on the **Blazor WASM client** and every demo scenario that runs in **30 seconds
+or less** (the model's recorded per-response time × the scenario's request count — i.e. the figure the
+UI advertises on each run button). Each demo is recorded as its own clip and gets a spoken **explanatory
+paragraph** narrated over it.
+
+Because the server hosts only Whisper (speech-**to**-text), narration — text-**to**-speech — is produced
+locally by the **built-in Windows TTS engine** (`System.Speech`) in `tools/DemoNarrator`; no cloud, no
+API keys. `tools/DemoNarratedVideoBuilder` then muxes each narration over its clip (freezing the last
+frame when the narration runs longer than the demo) and concatenates everything into one MP4. Demos that
+turn out to run far past 30 s on a particular prompt (so they don't qualify) are dropped, not shown blank.
+
+```bash
+# daemon + Server(:5537, MaxResponseTokens=2048) + Blazor client (:5180, `dotnet run`) running:
+cd frontend && npx playwright test tests/blazor-demo-video.spec.ts --config=playwright.video.blazor.config.ts
+#   -> one clip-NNN.webm per demo in frontend/blazor-demo-clips/ + manifest.json (clip → model/scenario + paragraph)
+#   PATCH=1 re-records only the demos that failed to capture; MODELS=a,b restricts to a subset
+cd .. && dotnet run --project tools/DemoNarrator                  # manifest → narration/clip-NNN.wav (System.Speech; NARRATION_RATE env, default +2)
+        dotnet run --project tools/DemoNarratedVideoBuilder       # clips + narration → docs/blazor-under30-narrated-demo.mp4
 ```
 
 > **MAI models are out of scope (cloud-only).** Microsoft's MAI family — MAI-Thinking-1,

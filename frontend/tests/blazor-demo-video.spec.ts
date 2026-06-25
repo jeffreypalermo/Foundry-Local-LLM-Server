@@ -179,75 +179,110 @@ async function buildWorkList(browser: Browser): Promise<Work[]> {
   return work;
 }
 
+type Demo = {
+  model: string; mode: Mode; kind: Kind; scenarioId: string; label: string;
+  count: number; etaSec: number; paragraph: string;
+};
+
+// Records ONE demo into clipName (in OUT_DIR) and returns whether a result actually rendered.
+async function recordDemo(browser: Browser, d: Demo, clipName: string): Promise<boolean> {
+  const ctx = await browser.newContext({
+    viewport: { width: 1280, height: 720 },
+    recordVideo: { dir: OUT_DIR, size: { width: 1280, height: 720 } },
+  });
+  const page = await ctx.newPage();
+  let ok = false;
+  try {
+    await page.goto(BLAZOR);
+    await expect(page.locator('.client-tag')).toHaveText('Blazor WASM client', { timeout: 90_000 });
+    await expect(page.locator('select[aria-label="Model"] option').nth(20)).toBeAttached({ timeout: 90_000 });
+
+    await setCaption(page, `${d.model} — ${d.label}`,
+      `${d.mode} · ${PURPOSE[`${d.kind}:${d.scenarioId}`] ?? d.label} · expect ~${d.etaSec}s`);
+
+    await expect(page.locator('select[aria-label="Model"]')).toBeEnabled({ timeout: IDLE_TIMEOUT });
+    // The Blazor client boots with the server's CURRENT model already selected. Only re-select (which
+    // makes the daemon reload the model) when it differs — re-selecting the same model on each of a
+    // model's consecutive demos caused the bigger 7B models to stall past the timeout.
+    const current = await page.locator('select[aria-label="Model"]').inputValue();
+    if (current !== d.model) {
+      await page.locator('select[aria-label="Model"]').selectOption(d.model);
+      await expect(page.locator('p.config-line strong')).toHaveText(d.model, { timeout: 60_000 });
+    }
+
+    const tab = page.locator(`button.mode-tab:has-text("${MODE_TAB[d.mode]}")`);
+    if (await tab.count() > 0) { await tab.first().click(); await page.waitForTimeout(300); }
+
+    const chip = page.locator(`[data-testid="scenario-${d.scenarioId}"]`).first();
+    await chip.click();
+    await page.waitForTimeout(500);
+
+    const before = await page.locator('article.message.assistant p').count();
+    if (await clickRunButton(page)) {
+      await page.waitForFunction(
+        (arg) => document.querySelectorAll(arg.sel).length > arg.before,
+        { sel: 'article.message.assistant p', before },
+        { timeout: RESULT_TIMEOUT },
+      );
+      await page.locator('button:has-text("Running...")')
+        .waitFor({ state: 'hidden', timeout: RESULT_TIMEOUT }).catch(() => {});
+      await scrollToLatestResult(page);
+      await page.waitForTimeout(700);
+      ok = true;
+    }
+  } catch (e) {
+    console.log(`[skip] ${d.model} · ${d.mode} · ${d.scenarioId} — ${(e as Error).message.split('\n')[0]}`);
+  }
+
+  const video = page.video();
+  await ctx.close(); // flushes the .webm to disk
+  if (video) {
+    const src = await video.path();
+    try { fs.renameSync(src, path.join(OUT_DIR, clipName)); } catch { /* leave original name */ }
+  }
+  return ok;
+}
+
 test('Blazor demos <=30s — record one clip per demo + manifest', async ({ browser }) => {
   test.setTimeout(3 * 60 * 60 * 1000);
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  let work = await buildWorkList(browser);
   const wanted = (process.env.MODELS || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+  // PATCH mode: re-record only the demos that produced no result (or all of a model, with FORCE=1)
+  // in an existing manifest, reusing each demo's clip filename so order/indices stay stable.
+  if (process.env.PATCH && fs.existsSync(MANIFEST)) {
+    const manifest: any[] = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+    const force = !!process.env.FORCE;
+    const targets = manifest.filter((e) =>
+      e.clip && (!wanted.length || wanted.includes(e.model)) && (force || !e.ok));
+    console.log(`PATCH: re-recording ${targets.length} demo(s).`);
+    for (const e of targets) {
+      const ok = await recordDemo(browser, e as Demo, e.clip);
+      e.ok = ok;
+      fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2));
+      console.log(`[${ok ? 'ok' : 'EMPTY'}] patched ${e.model} · ${e.mode} · ${e.label} -> ${e.clip}`);
+    }
+    console.log(`PATCH done: ${manifest.filter((m) => m.ok).length}/${manifest.length} now have output.`);
+    return;
+  }
+
+  let work = await buildWorkList(browser);
   if (wanted.length) work = work.filter((w) => wanted.includes(w.model));
-
   console.log(`Recording ${work.length} demo clips (<=${MAX_ETA}s) across ${new Set(work.map((w) => w.model)).size} models.`);
-  const manifest: any[] = [];
 
+  const manifest: any[] = [];
   for (let i = 0; i < work.length; i++) {
     const w = work[i];
-    const ctx = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
-      recordVideo: { dir: OUT_DIR, size: { width: 1280, height: 720 } },
-    });
-    const page = await ctx.newPage();
-    let ok = false;
-    try {
-      await page.goto(BLAZOR);
-      await expect(page.locator('.client-tag')).toHaveText('Blazor WASM client', { timeout: 90_000 });
-      await expect(page.locator('select[aria-label="Model"] option').nth(20)).toBeAttached({ timeout: 90_000 });
-
-      await setCaption(page, `${w.model} — ${w.label}`,
-        `${w.mode} · ${PURPOSE[`${w.kind}:${w.scenarioId}`] ?? w.label} · expect ~${w.etaSec}s  (demo ${i + 1}/${work.length})`);
-
-      await expect(page.locator('select[aria-label="Model"]')).toBeEnabled({ timeout: IDLE_TIMEOUT });
-      await page.locator('select[aria-label="Model"]').selectOption(w.model);
-      await expect(page.locator('p.config-line strong')).toHaveText(w.model, { timeout: 60_000 });
-
-      const tab = page.locator(`button.mode-tab:has-text("${MODE_TAB[w.mode]}")`);
-      if (await tab.count() > 0) { await tab.first().click(); await page.waitForTimeout(300); }
-
-      const chip = page.locator(`[data-testid="scenario-${w.scenarioId}"]`).first();
-      await chip.click();
-      await page.waitForTimeout(500);
-
-      const before = await page.locator('article.message.assistant p').count();
-      if (await clickRunButton(page)) {
-        await page.waitForFunction(
-          (arg) => document.querySelectorAll(arg.sel).length > arg.before,
-          { sel: 'article.message.assistant p', before },
-          { timeout: RESULT_TIMEOUT },
-        );
-        await page.locator('button:has-text("Running...")')
-          .waitFor({ state: 'hidden', timeout: RESULT_TIMEOUT }).catch(() => {});
-        await scrollToLatestResult(page);
-        await page.waitForTimeout(700);
-        ok = true;
-      }
-    } catch (e) {
-      console.log(`[skip] ${w.model} · ${w.mode} · ${w.scenarioId} — ${(e as Error).message.split('\n')[0]}`);
-    }
-
-    const video = page.video();
-    await ctx.close(); // flushes the .webm to disk
-    let clip = '';
-    if (video) {
-      const src = await video.path();
-      clip = `clip-${String(i).padStart(3, '0')}.webm`;
-      try { fs.renameSync(src, path.join(OUT_DIR, clip)); } catch { clip = path.basename(src); }
-    }
+    const clip = `clip-${String(i).padStart(3, '0')}.webm`;
+    const ok = await recordDemo(browser, w, clip);
+    const saved = fs.existsSync(path.join(OUT_DIR, clip)) ? clip : '';
     manifest.push({
-      index: i, clip, ok, model: w.model, mode: w.mode, kind: w.kind,
+      index: i, clip: saved, ok, model: w.model, mode: w.mode, kind: w.kind,
       scenarioId: w.scenarioId, label: w.label, count: w.count, etaSec: w.etaSec, paragraph: w.paragraph,
     });
     fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2)); // checkpoint after each clip
-    console.log(`[${ok ? 'ok' : 'EMPTY'}] ${i + 1}/${work.length}  ${w.model} · ${w.mode} · ${w.label} -> ${clip}`);
+    console.log(`[${ok ? 'ok' : 'EMPTY'}] ${i + 1}/${work.length}  ${w.model} · ${w.mode} · ${w.label} -> ${saved}`);
   }
 
   const okCount = manifest.filter((m) => m.ok).length;

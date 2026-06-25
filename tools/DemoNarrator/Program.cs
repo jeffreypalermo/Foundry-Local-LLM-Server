@@ -44,7 +44,8 @@ Console.WriteLine($"Voice: {chosen ?? "(default)"}  Rate: {rate}  Narrating {ent
 int written = 0, skipped = 0;
 foreach (var e in entries)
 {
-    if (string.IsNullOrWhiteSpace(e.Clip) || string.IsNullOrWhiteSpace(e.Paragraph)) { skipped++; continue; }
+    // Skip demos that never captured a result (ok:false) — they are dropped from the final video.
+    if (!e.Ok || string.IsNullOrWhiteSpace(e.Clip) || string.IsNullOrWhiteSpace(e.Paragraph)) { skipped++; continue; }
     var wav = Path.Combine(outDir, Path.ChangeExtension(e.Clip, ".wav"));
     synth.SetOutputToWaveFile(wav);
     synth.Speak(e.Paragraph);

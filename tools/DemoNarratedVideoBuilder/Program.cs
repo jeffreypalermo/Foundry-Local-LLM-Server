@@ -23,8 +23,10 @@ var narrationDir = Path.Combine(clipsDir, "narration");
 var entries = JsonSerializer.Deserialize<List<Entry>>(
     File.ReadAllText(manifestPath),
     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
-entries = entries.Where(e => !string.IsNullOrWhiteSpace(e.Clip)).OrderBy(e => e.Index).ToList();
-if (entries.Count == 0) { Console.Error.WriteLine("No clips referenced in manifest."); return 1; }
+// Only demos that actually captured a result (ok:true). Demos that stalled past the timeout — e.g. a
+// model that runs far longer than 30s on a particular prompt — are dropped, not shown as blank frames.
+entries = entries.Where(e => e.Ok && !string.IsNullOrWhiteSpace(e.Clip)).OrderBy(e => e.Index).ToList();
+if (entries.Count == 0) { Console.Error.WriteLine("No usable clips in manifest."); return 1; }
 
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputMp4))!);
 var tmp = Path.Combine(clipsDir, ".segments");
