@@ -43,3 +43,11 @@ blazor-dev.log
 blazor-dev.err.log
 blazor-under30.out
 frontend/test-results-blazor-under30.json
+# Narrated demo video pipeline (runtime artifacts)
+frontend/blazor-demo-clips/
+frontend/test-results-video-blazor/
+docs/blazor-under30-narrated-demo.mp4
+tts-smoke.wav
+blazor-video-full.out
+blazor-video-subset.out
+docs/blazor-under30-narrated-demo-SAMPLE.mp4
