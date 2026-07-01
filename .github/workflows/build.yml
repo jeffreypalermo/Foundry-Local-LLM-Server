@@ -100,3 +100,77 @@ jobs:
           } else {
             Write-Host "No open PR found for branch $branch"
           }
+
+  system-test:
+    name: System Test (AppHost + Playwright)
+    runs-on: windows-latest
+    concurrency:
+      group: system-test-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      checks: write
+    env:
+      BUILD_CONFIGURATION: Release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      # The AppHost starts the React frontend as a Vite dev server (Aspire.Hosting.JavaScript),
+      # which requires node_modules to already be installed.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Restore
+        run: dotnet restore FoundryLocalLlmServer.sln
+
+      - name: Build
+        run: dotnet build FoundryLocalLlmServer.sln --no-restore --configuration Release
+
+      # Boots the real Aspire AppHost (server + frontend) with Foundry Local stub responses —
+      # this runner has no GPU or Foundry Local daemon installed — and drives the UI with
+      # Playwright: runs the default fast chat demo and clicks "Unload All Models".
+      - name: Run system test
+        shell: pwsh
+        run: >
+          dotnet test FoundryLocalLlmServer.IntegrationTests/FoundryLocalLlmServer.IntegrationTests.csproj
+          --no-build --configuration Release
+          --filter "Category=SystemTest"
+          --logger "trx;LogFileName=system-tests.trx"
+          --results-directory build/test/SystemTests
+
+      - name: Test Reporter
+        uses: dorny/test-reporter@v2.1.1
+        if: always()
+        with:
+          name: System Test Results
+          path: 'build/test/SystemTests/*.trx'
+          reporter: dotnet-trx
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-system
+          path: build/test/SystemTests/*.trx
+          retention-days: 2

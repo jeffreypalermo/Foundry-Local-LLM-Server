@@ -122,7 +122,10 @@ Function IntegrationTest {
             "--collect:XPlat Code Coverage"
         )
         if ($SkipGpu) {
-            $testArgs += @("--filter", "Category!=GPU-Required")
+            # SystemTest boots its own AppHost (a second server process) and is run separately
+            # (see the "System Test" CI job) — running it here would race Start-StubServer's
+            # already-running instance for the same ports.
+            $testArgs += @("--filter", "Category!=GPU-Required&Category!=SystemTest")
         }
         exec { & dotnet @testArgs }
     }
