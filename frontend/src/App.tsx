@@ -23,6 +23,8 @@ function formatEta(seconds: number): string {
 
 type FoundryConfig = { endpoint: string; model: string };
 
+type FoundryStatus = { running: boolean; endpoint?: string };
+
 type ModelInfo = {
   id: string;
   capabilities: string[];
@@ -84,6 +86,10 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [daemonRunning, setDaemonRunning] = useState<boolean | null>(null);
+  const [unloading, setUnloading] = useState(false);
+  const [unloadMessage, setUnloadMessage] = useState<string | null>(null);
+
   const currentModel = useMemo(() => models.find((m) => m.id === selected) ?? null, [models, selected]);
   const availableModes = useMemo(() => modesFor(currentModel), [currentModel]);
   const kind = useMemo(() => kindFor(mode, currentModel), [mode, currentModel]);
@@ -105,6 +111,48 @@ function App() {
       }
     })();
   }, []);
+
+  // Poll whether the Foundry Local daemon is up and ready to receive requests, so the app doesn't
+  // silently try to work against a daemon that was never started.
+  useEffect(() => {
+    let cancelled = false;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/foundry/status');
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const status = (await res.json()) as FoundryStatus;
+        if (!cancelled) setDaemonRunning(status.running);
+      } catch {
+        if (!cancelled) setDaemonRunning(false);
+      }
+    };
+    void checkStatus();
+    const interval = setInterval(checkStatus, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const onUnloadAll = async () => {
+    if (unloading) return;
+    setUnloading(true);
+    setUnloadMessage(null);
+    try {
+      const res = await fetch('/api/models/unload-all', { method: 'POST' });
+      if (!res.ok) throw new Error(await readError(res));
+      const payload = (await res.json()) as { unloaded: string[] };
+      setUnloadMessage(
+        payload.unloaded.length > 0
+          ? `Unloaded ${payload.unloaded.length} model(s): ${payload.unloaded.join(', ')}`
+          : 'No models were loaded.',
+      );
+    } catch (err: unknown) {
+      setUnloadMessage(err instanceof Error ? err.message : 'Could not unload models');
+    } finally {
+      setUnloading(false);
+    }
+  };
 
   // Keep the active mode valid for the selected model.
   useEffect(() => {
@@ -320,6 +368,21 @@ function App() {
 
   return (
     <main className="app-shell">
+      <div
+        className={`daemon-banner ${daemonRunning === null ? 'checking' : daemonRunning ? 'ready' : 'not-ready'}`}
+        role="status"
+      >
+        <span className="daemon-banner-text">
+          {daemonRunning === null && 'Checking Foundry Local status…'}
+          {daemonRunning === true && '🟢 Foundry Local is running and ready to receive requests'}
+          {daemonRunning === false && '🔴 Foundry Local daemon is not running — start it with "foundry service start"'}
+        </span>
+        <button type="button" onClick={onUnloadAll} disabled={unloading}>
+          {unloading ? 'Unloading...' : 'Unload All Models'}
+        </button>
+      </div>
+      {unloadMessage && <p className="unload-message">{unloadMessage}</p>}
+
       <h1>Foundry Local OpenAI Server</h1>
 
       <div className="controls">

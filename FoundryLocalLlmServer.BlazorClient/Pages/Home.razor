@@ -2,10 +2,33 @@
 @using System.Net.Http.Json
 @using System.Net.Http.Headers
 @using Microsoft.AspNetCore.Components.Forms
+@implements IDisposable
 @inject HttpClient Http
 @inject NavigationManager Nav
 
 <main class="app-shell">
+    <div class="daemon-banner @(daemonRunning is null ? "checking" : daemonRunning.Value ? "ready" : "not-ready")" role="status">
+        <span class="daemon-banner-text">
+            @if (daemonRunning is null)
+            {
+                @:Checking Foundry Local status…
+            }
+            else if (daemonRunning.Value)
+            {
+                @:🟢 Foundry Local is running and ready to receive requests
+            }
+            else
+            {
+                @:🔴 Foundry Local daemon is not running — start it with "foundry service start"
+            }
+        </span>
+        <button type="button" @onclick="OnUnloadAll" disabled="@unloading">@(unloading ? "Unloading..." : "Unload All Models")</button>
+    </div>
+    @if (unloadMessage is not null)
+    {
+        <p class="unload-message">@unloadMessage</p>
+    }
+
     <h1>Foundry Local OpenAI Server <span class="client-tag">Blazor WASM client</span></h1>
 
     <div class="controls">
@@ -150,6 +173,11 @@
     bool busy;
     string? error;
 
+    bool? daemonRunning;
+    bool unloading;
+    string? unloadMessage;
+    CancellationTokenSource? statusPollCts;
+
     ModelInfo? Current => models.FirstOrDefault(m => m.Id == selected);
     List<string> AvailableModes => ModesFor(Current);
     string Kind => KindFor(mode, Current);
@@ -200,6 +228,61 @@
             ApplyScenario(scenarioList.FirstOrDefault());
         }
         catch (Exception ex) { error = ex.Message; }
+
+        _ = PollDaemonStatusAsync();
+    }
+
+    // Polls whether the Foundry Local daemon is up and ready, so the app doesn't silently try to
+    // work against a daemon that was never started.
+    async Task PollDaemonStatusAsync()
+    {
+        statusPollCts = new CancellationTokenSource();
+        var token = statusPollCts.Token;
+        while (!token.IsCancellationRequested)
+        {
+            await CheckDaemonStatusAsync();
+            try { await Task.Delay(TimeSpan.FromSeconds(5), token); }
+            catch (TaskCanceledException) { break; }
+        }
+    }
+
+    async Task CheckDaemonStatusAsync()
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<FoundryStatus>("/api/foundry/status");
+            daemonRunning = status?.Running ?? false;
+        }
+        catch
+        {
+            daemonRunning = false;
+        }
+        StateHasChanged();
+    }
+
+    async Task OnUnloadAll()
+    {
+        if (unloading) return;
+        unloading = true;
+        unloadMessage = null;
+        try
+        {
+            var resp = await Http.PostAsync("/api/models/unload-all", null);
+            if (!resp.IsSuccessStatusCode) throw new Exception(await ReadError(resp));
+            var payload = await resp.Content.ReadFromJsonAsync<UnloadAllResponse>();
+            var unloaded = payload?.Unloaded ?? [];
+            unloadMessage = unloaded.Length > 0
+                ? $"Unloaded {unloaded.Length} model(s): {string.Join(", ", unloaded)}"
+                : "No models were loaded.";
+        }
+        catch (Exception ex) { unloadMessage = ex.Message; }
+        finally { unloading = false; }
+    }
+
+    public void Dispose()
+    {
+        statusPollCts?.Cancel();
+        statusPollCts?.Dispose();
     }
 
     void ApplyScenario(Scenario? s)

@@ -8,6 +8,17 @@ public sealed class FoundryConfig
     public string Model { get; set; } = "";
 }
 
+public sealed class FoundryStatus
+{
+    public bool Running { get; set; }
+    public string? Endpoint { get; set; }
+}
+
+public sealed class UnloadAllResponse
+{
+    public string[] Unloaded { get; set; } = [];
+}
+
 public sealed class ModelInfo
 {
     public string Id { get; set; } = "";

@@ -61,6 +61,45 @@ button {
   font-weight: 600;
 }
 
+.daemon-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d4d4d8;
+  font-weight: 600;
+}
+
+.daemon-banner.checking {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.daemon-banner.ready {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+
+.daemon-banner.not-ready {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.daemon-banner button {
+  flex-shrink: 0;
+}
+
+.unload-message {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
 .controls {
   display: grid;
   gap: 0.4rem;

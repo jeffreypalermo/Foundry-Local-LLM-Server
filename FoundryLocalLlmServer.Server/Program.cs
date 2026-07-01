@@ -157,6 +157,28 @@ app.MapGet("/api/foundry", (IOptions<FoundryLocalOptions> options) =>
     });
 });
 
+// Lightweight daemon readiness probe for the SPA's startup banner. Deliberately does NOT run the
+// `foundry` CLI (that can spend up to 60s trying to boot the daemon) — it just checks whether the
+// last-known/configured endpoint answers /v1/models, so the banner updates quickly on every poll.
+app.MapGet("/api/foundry/status", async (IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory) =>
+{
+    if (options.Value.UseStubResponses)
+        return Results.Ok(new { running = true, endpoint = options.Value.Endpoint });
+
+    var endpointToCheck = _currentFoundryEndpoint ?? options.Value.Endpoint;
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(2);
+        var resp = await client.GetAsync($"{endpointToCheck}/v1/models");
+        return Results.Ok(new { running = resp.IsSuccessStatusCode, endpoint = endpointToCheck });
+    }
+    catch
+    {
+        return Results.Ok(new { running = false, endpoint = endpointToCheck });
+    }
+});
+
 // Selectable models for this server. The list is the configured AvailableModels (curated to the
 // GPU-compatible catalog for this host); falls back to the single configured Model when empty.
 // Each entry carries its capability set (text/code/reasoning/vision/audio/tools) so the SPA can
@@ -543,6 +565,47 @@ app.MapGet("/v1/models", async (IOptions<FoundryLocalOptions> options, IHttpClie
             new { id = model, @object = "model", created = 0, owned_by = "foundry-local" }
         }
     });
+});
+
+// Unloads every model currently resident in the Foundry daemon (freeing VRAM) and forgets the
+// proxy's single-model bookkeeping, so the next chat request loads fresh. Foundry's /v1/models
+// only lists resident models (it 400s on ids that aren't loaded — see EnsureExclusiveLoadAsync),
+// so that list IS the set to unload.
+app.MapPost("/api/models/unload-all", async (IOptions<FoundryLocalOptions> options, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+{
+    if (options.Value.UseStubResponses)
+    {
+        await ModelLoadState.Lock.WaitAsync();
+        try { ModelLoadState.CurrentLoadedId = null; }
+        finally { ModelLoadState.Lock.Release(); }
+        return Results.Ok(new { unloaded = Array.Empty<string>() });
+    }
+
+    var endpoint = await GetFoundryEndpointAsync(options.Value.Endpoint);
+    var loadedModels = await GetFoundryModelsAsync(endpoint, httpClientFactory, forceRefresh: true);
+
+    var unloaded = new List<string>();
+    await ModelLoadState.Lock.WaitAsync();
+    try
+    {
+        foreach (var model in loadedModels)
+        {
+            logger.LogInformation("Unloading {Model}", model.Id);
+            await RunFoundryAsync($"model unload {model.Id}", 60);
+            unloaded.Add(model.Id);
+        }
+        ModelLoadState.CurrentLoadedId = null;
+    }
+    finally
+    {
+        ModelLoadState.Lock.Release();
+    }
+
+    aliasCache.Clear();
+    cachedModels = [];
+    cachedModelsExpiry = DateTime.MinValue;
+
+    return Results.Ok(new { unloaded });
 });
 
 app.MapPost("/v1/chat/completions", async (HttpContext context, IOptions<FoundryLocalOptions> options, IOptions<OllamaFallbackOptions> ollamaOptions, IHttpClientFactory httpClientFactory, ILogger<Program> logger, CancellationToken cancellationToken) =>
