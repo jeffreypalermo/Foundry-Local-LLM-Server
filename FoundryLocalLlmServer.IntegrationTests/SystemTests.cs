@@ -1,3 +1,8 @@
+// The AppHost project reference is aliased (see the csproj) so its top-level Program class can't
+// collide with the Server's Program in the WebApplicationFactory<Program> tests. The generated
+// Projects.FoundryLocalLlmServer_AppHost metadata class lives in that aliased assembly.
+extern alias apphost;
+
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
@@ -23,7 +28,7 @@ public class SystemTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.FoundryLocalLlmServer_AppHost>();
+        var appHost = await DistributedApplicationTestingBuilder.CreateAsync<apphost::Projects.FoundryLocalLlmServer_AppHost>();
 
         // No GPU / Foundry Local daemon on CI runners — the server still runs its normal startup
         // path (which checks for and tries to start the Foundry daemon) but answers chat requests
