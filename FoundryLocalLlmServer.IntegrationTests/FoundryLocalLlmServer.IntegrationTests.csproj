@@ -30,8 +30,11 @@
   <ItemGroup>
     <ProjectReference Include="..\FoundryLocalLlmServer.Server\FoundryLocalLlmServer.Server.csproj" />
     <!-- Referencing the AppHost project is what lets Aspire.Hosting.Testing generate the
-         Projects.FoundryLocalLlmServer_AppHost type used by DistributedApplicationTestingBuilder. -->
-    <ProjectReference Include="..\FoundryLocalLlmServer.AppHost\FoundryLocalLlmServer.AppHost.csproj" />
+         Projects.FoundryLocalLlmServer_AppHost type used by DistributedApplicationTestingBuilder
+         (the metadata class is generated into THIS project, not the AppHost assembly).
+         Aliases keeps the AppHost's own top-level Program class out of the default namespace —
+         otherwise it collides with the Server's Program in every WebApplicationFactory<Program> test. -->
+    <ProjectReference Include="..\FoundryLocalLlmServer.AppHost\FoundryLocalLlmServer.AppHost.csproj" Aliases="apphost" />
   </ItemGroup>
 
 </Project>
